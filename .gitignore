@@ -1,0 +1,48 @@
+# Binaries and compiled files
+bin/
+backend/bin/
+parser/bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go
+backend/uploads/
+backend/securemailscope.db
+
+# Node.js
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.npm/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python
+ai_engine/__pycache__/
+ai_engine/*.pyc
+ai_engine/venv/
+ai_engine/.env
+ai_engine/env/
+*.pyo
+*.pyd
+
+# Testing / Data
+testdata/output/
+testdata/*.pcap
+testdata/*.pcapng
+!testdata/gen_pcap.py
+!testdata/generate_traffic.sh
+!testdata/certs/
+
+# IDE and OS files
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment variables
+.env
+.env.local
