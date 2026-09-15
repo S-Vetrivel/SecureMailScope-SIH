@@ -19,7 +19,7 @@ export default function AnalysesPage() {
   useEffect(() => {
     fetchAnalyses()
       .then((d) => {
-        setAnalyses(d.analyses || []);
+        setAnalyses(Array.isArray(d) ? d : d.analyses || []);
         setLoading(false);
       })
       .catch(() => setLoading(false));

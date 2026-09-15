@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from "react";
 import Sidebar from "../components/Sidebar";
 import { Upload, FileUp, CheckCircle, Loader, AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { uploadPCAP } from "../lib/api";
+import { uploadPCAP, createAnalysis, startAnalysis } from "../lib/api";
 
 export default function UploadPage() {
   const [state, setState] = useState("idle");
@@ -32,16 +32,18 @@ export default function UploadPage() {
       }, 300);
 
       try {
-        const data = await uploadPCAP(file);
+        const uploadRes = await uploadPCAP(file);
+        const analysis = await createAnalysis(uploadRes.pcap_path);
+        await startAnalysis(analysis.id);
 
         clearInterval(interval);
-        setAnalysisId(data.analysis_id);
+        setAnalysisId(analysis.id);
         setProgress(100);
         setState("success");
       } catch (err) {
         clearInterval(interval);
         setErrorMsg(
-          "Upload failed. Make sure the API server is running on port 8080."
+          "Upload failed. Make sure the backend server is running on port 8080."
         );
         setState("error");
       }

@@ -55,15 +55,13 @@ export default function AnalysisDetailPage() {
     fetchAnalysis(id)
       .then((d) => {
         setData(d);
-        if (d.results?.sessions) {
-          setSessions(d.results.sessions);
-        }
       })
       .catch(() => {});
 
     fetchAnalysisSessions(id)
       .then((d) => {
-        if (d.sessions?.length) setSessions(d.sessions);
+        const sessList = Array.isArray(d) ? d : d.sessions || [];
+        setSessions(sessList);
       })
       .catch(() => {});
   }, [id]);
@@ -213,29 +211,35 @@ export default function AnalysisDetailPage() {
                 <span className="card-title">Severity Breakdown</span>
               </div>
               <ResponsiveContainer width="100%" height={260}>
-                <BarChart
-                  data={Object.entries(data.severity_breakdown || {}).map(([name, value]) => ({
+                {(() => {
+                  const breakdown = data.severity_breakdown && Object.keys(data.severity_breakdown).length > 0
+                    ? data.severity_breakdown
+                    : { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 };
+                  const chartData = Object.entries(breakdown).map(([name, value]) => ({
                     name,
                     value,
                     color: SEV_COLORS[name] || "#6b7280",
-                  }))}
-                >
-                  <XAxis dataKey="name" tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                  <YAxis tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                  <Tooltip
-                    contentStyle={{
-                      background: "#1a1f35",
-                      border: "1px solid #2a3050",
-                      borderRadius: "8px",
-                      color: "#f1f5f9",
-                    }}
-                  />
-                  <Bar dataKey="value" radius={[6, 6, 0, 0]}>
-                    {Object.entries(data.severity_breakdown || {}).map(([name], idx) => (
-                      <Cell key={idx} fill={SEV_COLORS[name] || "#6b7280"} />
-                    ))}
-                  </Bar>
-                </BarChart>
+                  }));
+                  return (
+                    <BarChart data={chartData}>
+                      <XAxis dataKey="name" tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                      <YAxis tick={{ fill: "#94a3b8", fontSize: 12 }} allowDecimals={false} />
+                      <Tooltip
+                        contentStyle={{
+                          background: "#1a1f35",
+                          border: "1px solid #2a3050",
+                          borderRadius: "8px",
+                          color: "#f1f5f9",
+                        }}
+                      />
+                      <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                        {chartData.map((entry, idx) => (
+                          <Cell key={idx} fill={entry.color} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  );
+                })()}
               </ResponsiveContainer>
             </div>
           </div>
@@ -269,10 +273,20 @@ export default function AnalysisDetailPage() {
                   >
                     {expanded[s.session_id] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                     <span className={`severity-badge ${(s.severity || "INFO").toLowerCase()}`}>{s.severity || "INFO"}</span>
-                    <span className="mono" style={{ fontSize: 13 }}>{s.protocol}</span>
+                    <span className="mono" style={{ fontSize: 13, fontWeight: 600 }}>{s.protocol}</span>
                     <span style={{ color: "var(--text-muted)", fontSize: 13 }}>
                       {s.src_ip} → {s.dst_ip}
                     </span>
+                    {s.tls_version && (
+                      <span className="cve-tag" style={{ background: "rgba(59, 130, 246, 0.15)", color: "#60a5fa", border: "1px solid rgba(59, 130, 246, 0.3)" }}>
+                        {s.tls_version}
+                      </span>
+                    )}
+                    {s.signature_algorithm && (
+                      <span className="cve-tag" style={{ background: "rgba(168, 85, 247, 0.15)", color: "#c084fc", border: "1px solid rgba(168, 85, 247, 0.3)" }}>
+                        {s.signature_algorithm}
+                      </span>
+                    )}
                     <span style={{ marginLeft: "auto", fontWeight: 700, color: scoreColor(s.risk_score || 0) }}>
                       {(s.risk_score || 0).toFixed(1)}
                     </span>
@@ -280,7 +294,7 @@ export default function AnalysisDetailPage() {
                       <AlertTriangle size={14} color="#f59e0b" title="Anomalous session" />
                     )}
                     {s.has_forward_secrecy ? (
-                      <Lock size={14} color="#10b981" title="Forward secrecy" />
+                      <Lock size={14} color="#10b981" title="Forward secrecy (ECDHE/DHE)" />
                     ) : (
                       <Unlock size={14} color="#f97316" title="No forward secrecy" />
                     )}
@@ -291,32 +305,76 @@ export default function AnalysisDetailPage() {
                       <div
                         style={{
                           display: "grid",
-                          gridTemplateColumns: "repeat(3, 1fr)",
+                          gridTemplateColumns: "repeat(4, 1fr)",
                           gap: 12,
                           marginBottom: 16,
+                          background: "rgba(15, 23, 42, 0.4)",
+                          padding: 12,
+                          borderRadius: 8,
+                          border: "1px solid var(--border-color)",
                         }}
                       >
                         <div>
                           <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
                             TLS Version
                           </div>
-                          <div className="mono" style={{ fontSize: 14 }}>
-                            {s.tls_version || "None"}
+                          <div className="mono" style={{ fontSize: 13, color: "#60a5fa", fontWeight: 600 }}>
+                            {s.tls_version || s.tls?.version || "Plaintext / None"}
                           </div>
                         </div>
                         <div>
                           <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
                             Cipher Suite
                           </div>
-                          <div className="mono" style={{ fontSize: 12, wordBreak: "break-all" }}>
-                            {s.negotiated_cipher || "None"}
+                          <div className="mono" style={{ fontSize: 12, wordBreak: "break-all", color: "#e2e8f0" }}>
+                            {s.negotiated_cipher || s.tls?.cipher_suite || "N/A"}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+                            Signature Algorithm
+                          </div>
+                          <div className="mono" style={{ fontSize: 13, color: "#c084fc" }}>
+                            {s.signature_algorithm || s.tls?.signature_algorithm || "N/A"}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+                            Key Exchange & PFS
+                          </div>
+                          <div className="mono" style={{ fontSize: 13, color: s.has_forward_secrecy ? "#34d399" : "#fb923c" }}>
+                            {s.tls?.key_exchange || (s.has_forward_secrecy ? "ECDHE / PFS" : "RSA / Standard")}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+                            Certificate Subject
+                          </div>
+                          <div className="mono" style={{ fontSize: 12, color: "#94a3b8" }}>
+                            {s.certificate?.subject || "Not Provided"}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+                            Certificate Issuer
+                          </div>
+                          <div className="mono" style={{ fontSize: 12, color: "#94a3b8" }}>
+                            {s.certificate?.issuer || "Not Provided"}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+                            Cert Key Length / Alg
+                          </div>
+                          <div className="mono" style={{ fontSize: 13, color: "#38bdf8" }}>
+                            {s.certificate?.public_key_algorithm ? `${s.certificate.public_key_algorithm} (${s.certificate.key_length} bits)` : "N/A"}
                           </div>
                         </div>
                         <div>
                           <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
                             Anomaly Score
                           </div>
-                          <div className="mono" style={{ fontSize: 14 }}>
+                          <div className="mono" style={{ fontSize: 13, color: "#f59e0b" }}>
                             {(s.anomaly_score || 0).toFixed(3)}
                           </div>
                         </div>
