@@ -74,10 +74,14 @@ export default function AnalysesPage() {
                 </thead>
                 <tbody>
                   {analyses.map((a) => (
-                    <tr key={a.id}>
+                    <tr
+                      key={a.id}
+                      style={{ cursor: "pointer" }}
+                      onClick={() => (window.location.href = `/analysis/${a.id}`)}
+                    >
                       <td className="mono">{a.pcap_filename}</td>
                       <td>
-                        <span className={`status-badge ${a.status}`}>
+                        <span className={`status-badge ${(a.status || "").toLowerCase()}`}>
                           <span className="status-dot" />
                           {a.status}
                         </span>
@@ -91,19 +95,18 @@ export default function AnalysesPage() {
                         </span>
                       </td>
                       <td>{a.total_sessions}</td>
-                      <td>{a.anomaly_count}</td>
+                      <td>{a.anomaly_count || 0}</td>
                       <td style={{ color: "var(--text-muted)", fontSize: 13 }}>
-                        {new Date(a.created_at).toLocaleString()}
+                        {a.started_at ? new Date(a.started_at).toLocaleString() : "N/A"}
                       </td>
                       <td>
-                        {a.status === "completed" && (
-                          <Link
-                            to={`/analysis/${a.id}`}
-                            style={{ color: "var(--accent-blue)" }}
-                          >
-                            <ExternalLink size={16} />
-                          </Link>
-                        )}
+                        <Link
+                          to={`/analysis/${a.id}`}
+                          style={{ color: "var(--accent-blue)" }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink size={16} />
+                        </Link>
                       </td>
                     </tr>
                   ))}

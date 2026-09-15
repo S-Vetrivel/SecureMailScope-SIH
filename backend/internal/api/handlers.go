@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -20,6 +21,7 @@ type Server struct {
 	service     *analysis.Service
 	uploadDir   string
 	upgrader    websocket.Upgrader
+	wsMu        sync.RWMutex
 	wsClients   map[*websocket.Conn]bool
 }
 
@@ -190,7 +192,12 @@ func (s *Server) GetAnalysisFindings(c *gin.Context) {
 
 func (s *Server) GetFindingDetail(c *gin.Context) {
 	id := c.Param("id")
-	c.JSON(http.StatusOK, gin.H{"id": id, "status": "ok"})
+	finding, err := s.repo.GetFinding(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"code": "NOT_FOUND", "message": "Finding not found"}})
+		return
+	}
+	c.JSON(http.StatusOK, finding)
 }
 
 func (s *Server) GetAnalysisSummary(c *gin.Context) {
@@ -239,14 +246,25 @@ func (s *Server) WebSocketEvents(c *gin.Context) {
 	if err != nil {
 		return
 	}
+	s.wsMu.Lock()
 	s.wsClients[ws] = true
+	s.wsMu.Unlock()
 }
 
 func (s *Server) broadcastWSEvent(evt analysis.ProgressEvent) {
+	s.wsMu.RLock()
+	clients := make([]*websocket.Conn, 0, len(s.wsClients))
 	for client := range s.wsClients {
+		clients = append(clients, client)
+	}
+	s.wsMu.RUnlock()
+
+	for _, client := range clients {
 		if err := client.WriteJSON(evt); err != nil {
 			client.Close()
+			s.wsMu.Lock()
 			delete(s.wsClients, client)
+			s.wsMu.Unlock()
 		}
 	}
 }

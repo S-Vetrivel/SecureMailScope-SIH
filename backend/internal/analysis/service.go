@@ -322,8 +322,15 @@ func computeScores(s *models.EmailSession) models.SessionScores {
 		if s.Certificate.Expired {
 			certScore = math.Min(certScore, 0.1)
 		}
-		if s.Certificate.KeyBits > 0 && s.Certificate.KeyBits < 2048 {
-			certScore = math.Min(certScore, 0.3)
+		// Fix key bit size evaluation per key algorithm
+		alg := strings.ToUpper(s.Certificate.KeyAlgorithm)
+		bits := s.Certificate.KeyBits
+		if bits > 0 {
+			if alg == "RSA" && bits < 2048 {
+				certScore = math.Min(certScore, 0.3)
+			} else if alg == "ECDSA" && bits < 256 {
+				certScore = math.Min(certScore, 0.3)
+			}
 		}
 		scores.Certificate = certScore
 

@@ -316,10 +316,10 @@ export default function AnalysisDetailPage() {
                       >
                         <div>
                           <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
-                            TLS Version
+                            Encryption Status
                           </div>
-                          <div className="mono" style={{ fontSize: 13, color: "#60a5fa", fontWeight: 600 }}>
-                            {s.tls_version || s.tls?.version || "Plaintext / None"}
+                          <div className="mono" style={{ fontSize: 13, color: (s.tls_version || s.tls?.version) ? "#60a5fa" : "#f97316", fontWeight: 600 }}>
+                            {s.tls_version || s.tls?.version ? `${s.tls_version || s.tls?.version} (Encrypted)` : "Unencrypted Plaintext"}
                           </div>
                         </div>
                         <div>
@@ -327,7 +327,7 @@ export default function AnalysisDetailPage() {
                             Cipher Suite
                           </div>
                           <div className="mono" style={{ fontSize: 12, wordBreak: "break-all", color: "#e2e8f0" }}>
-                            {s.negotiated_cipher || s.tls?.cipher_suite || "N/A"}
+                            {s.negotiated_cipher || s.tls?.cipher_suite || "None (Plaintext Traffic)"}
                           </div>
                         </div>
                         <div>
@@ -335,7 +335,7 @@ export default function AnalysisDetailPage() {
                             Signature Algorithm
                           </div>
                           <div className="mono" style={{ fontSize: 13, color: "#c084fc" }}>
-                            {s.signature_algorithm || s.tls?.signature_algorithm || "N/A"}
+                            {s.signature_algorithm || s.tls?.signature_algorithm || "None (Unencrypted)"}
                           </div>
                         </div>
                         <div>
@@ -343,7 +343,7 @@ export default function AnalysisDetailPage() {
                             Key Exchange & PFS
                           </div>
                           <div className="mono" style={{ fontSize: 13, color: s.has_forward_secrecy ? "#34d399" : "#fb923c" }}>
-                            {s.tls?.key_exchange || (s.has_forward_secrecy ? "ECDHE / PFS" : "RSA / Standard")}
+                            {s.tls?.key_exchange ? s.tls.key_exchange : s.has_forward_secrecy ? "ECDHE / PFS" : "None (Plaintext / No TLS)"}
                           </div>
                         </div>
                         <div>
@@ -351,7 +351,7 @@ export default function AnalysisDetailPage() {
                             Certificate Subject
                           </div>
                           <div className="mono" style={{ fontSize: 12, color: "#94a3b8" }}>
-                            {s.certificate?.subject || "Not Provided"}
+                            {s.certificate?.subject || "Not Applicable (No TLS Cert)"}
                           </div>
                         </div>
                         <div>
@@ -359,7 +359,7 @@ export default function AnalysisDetailPage() {
                             Certificate Issuer
                           </div>
                           <div className="mono" style={{ fontSize: 12, color: "#94a3b8" }}>
-                            {s.certificate?.issuer || "Not Provided"}
+                            {s.certificate?.issuer || "Not Applicable (No TLS Cert)"}
                           </div>
                         </div>
                         <div>
@@ -367,15 +367,39 @@ export default function AnalysisDetailPage() {
                             Cert Key Length / Alg
                           </div>
                           <div className="mono" style={{ fontSize: 13, color: "#38bdf8" }}>
-                            {s.certificate?.public_key_algorithm ? `${s.certificate.public_key_algorithm} (${s.certificate.key_length} bits)` : "N/A"}
+                            {s.certificate?.public_key_algorithm ? `${s.certificate.public_key_algorithm} (${s.certificate.key_length} bits)` : "None"}
                           </div>
                         </div>
                         <div>
                           <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
-                            Anomaly Score
+                            Packet Count
                           </div>
-                          <div className="mono" style={{ fontSize: 13, color: "#f59e0b" }}>
-                            {(s.anomaly_score || 0).toFixed(3)}
+                          <div className="mono" style={{ fontSize: 13, color: "#f87171", fontWeight: 600 }}>
+                            {s.packet_count || 0} packets
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+                            Client / Server Bytes
+                          </div>
+                          <div className="mono" style={{ fontSize: 13, color: "#38bdf8" }}>
+                            {s.client_bytes || 0} B / {s.server_bytes || 0} B
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+                            Stream Completion / Gaps
+                          </div>
+                          <div className="mono" style={{ fontSize: 13, color: s.stream_complete ? "#34d399" : "#f59e0b" }}>
+                            {s.stream_complete ? "Complete" : "Incomplete"} {s.reassembly_gap ? "(Gaps Detected)" : "(No Gaps)"}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+                            Session Duration
+                          </div>
+                          <div className="mono" style={{ fontSize: 12, color: "#94a3b8" }}>
+                            {s.start_time ? new Date(s.start_time).toLocaleTimeString() : "N/A"} - {s.end_time ? new Date(s.end_time).toLocaleTimeString() : "N/A"}
                           </div>
                         </div>
                       </div>

@@ -41,12 +41,29 @@ func (r *PCAPReader) ReadPackets(onPacket func(pkt PacketMetadata) error) (int, 
 	}
 	defer f.Close()
 
-	handle, err := pcapgo.NewReader(f)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create pcapgo reader for %s: %w", r.Path, err)
+	// Check magic bytes to select pcap vs pcapng reader
+	magic := make([]byte, 4)
+	if _, err := f.ReadAt(magic, 0); err != nil {
+		return 0, fmt.Errorf("failed to read header magic for %s: %w", r.Path, err)
 	}
 
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
+	var packetSource *gopacket.PacketSource
+	if magic[0] == 0x0a && magic[1] == 0x0d && magic[2] == 0x0d && magic[3] == 0x0a {
+		// PCAPNG format
+		ngReader, err := pcapgo.NewNgReader(f, pcapgo.DefaultNgReaderOptions)
+		if err != nil {
+			return 0, fmt.Errorf("failed to create pcapgo ng reader for %s: %w", r.Path, err)
+		}
+		packetSource = gopacket.NewPacketSource(ngReader, ngReader.LinkType())
+	} else {
+		// Standard PCAP format
+		rdr, err := pcapgo.NewReader(f)
+		if err != nil {
+			return 0, fmt.Errorf("failed to create pcapgo reader for %s: %w", r.Path, err)
+		}
+		packetSource = gopacket.NewPacketSource(rdr, rdr.LinkType())
+	}
+
 	packetCount := 0
 
 	for packet := range packetSource.Packets() {

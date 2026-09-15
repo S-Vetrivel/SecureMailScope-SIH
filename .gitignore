@@ -48,3 +48,4 @@ testdata/*.pcapng
 # Environment variables
 .env
 .env.local
+backend/data/*

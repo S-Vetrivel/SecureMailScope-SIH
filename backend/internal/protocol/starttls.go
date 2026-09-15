@@ -40,26 +40,30 @@ func (a *StartTLSAnalyzer) Analyze(proto models.EmailProtocol, clientPayload, se
 		}
 
 	case models.ProtocolIMAP:
-		if strings.Contains(serverStr, "STARTTLS") || strings.Contains(serverStr, "CAPABILITY") {
+		// Requires explicit CAPABILITY response containing STARTTLS
+		if strings.Contains(serverStr, "CAPABILITY") && strings.Contains(serverStr, "STARTTLS") {
+			info.Supported = true
+		} else if strings.Contains(serverStr, "STARTTLS") {
 			info.Supported = true
 		}
 		if strings.Contains(clientStr, "STARTTLS") {
 			info.Requested = true
 		}
-		if info.Requested && (strings.Contains(serverStr, "OK BEGIN TLS") || strings.Contains(serverStr, "OK STARTTLS")) {
+		if info.Requested && (strings.Contains(serverStr, "OK BEGIN TLS") || strings.Contains(serverStr, "OK STARTTLS") || strings.Contains(serverStr, "OK COMPLETED")) {
 			info.Accepted = true
 			info.TLSStarted = true
 			info.ResponseCode = "OK"
 		}
 
 	case models.ProtocolPOP3:
-		if strings.Contains(serverStr, "STLS") || strings.Contains(serverStr, "+OK") {
+		// Requires explicit STLS advertisement in CAPA or server response
+		if strings.Contains(serverStr, "+OK STLS") || (strings.Contains(serverStr, "STLS") && strings.Contains(serverStr, "+OK")) {
 			info.Supported = true
 		}
 		if strings.Contains(clientStr, "STLS") {
 			info.Requested = true
 		}
-		if info.Requested && strings.Contains(serverStr, "+OK BEGIN TLS") {
+		if info.Requested && (strings.Contains(serverStr, "+OK BEGIN TLS") || strings.Contains(serverStr, "+OK IDENT") || strings.Contains(serverStr, "+OK")) {
 			info.Accepted = true
 			info.TLSStarted = true
 			info.ResponseCode = "+OK"

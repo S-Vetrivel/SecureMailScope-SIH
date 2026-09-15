@@ -423,6 +423,20 @@ func (r *Repository) GetFindingsForAnalysis(analysisID string) ([]models.Finding
 	return findings, nil
 }
 
+func (r *Repository) GetFinding(id string) (*models.Finding, error) {
+	query := `SELECT id, title, severity, category, session_id, description, evidence_json, recommendation FROM findings WHERE id = ?`
+	row := r.db.QueryRow(query, id)
+
+	var f models.Finding
+	var sevStr, evStr string
+	if err := row.Scan(&f.ID, &f.Title, &sevStr, &f.Category, &f.SessionID, &f.Description, &evStr, &f.Recommendation); err != nil {
+		return nil, err
+	}
+	f.Severity = models.Severity(sevStr)
+	_ = json.Unmarshal([]byte(evStr), &f.Evidence)
+	return &f, nil
+}
+
 func severityToScore(sev models.Severity) float64 {
 	switch sev {
 	case models.SeverityCritical:
