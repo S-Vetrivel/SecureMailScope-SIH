@@ -1,0 +1,145 @@
+{
+  "analysis_metadata": {
+    "engine_version": "1.0.0",
+    "analyzed_at": "2026-09-15T13:58:42.789340+00:00",
+    "input_file": "sessions.json",
+    "total_sessions": 3
+  },
+  "summary": {
+    "overall_score": 7.0,
+    "overall_severity": "HIGH",
+    "total_sessions": 3,
+    "severity_breakdown": {
+      "CRITICAL": 2,
+      "INFO": 1
+    },
+    "tls_version_breakdown": {
+      "None": 2,
+      "TLS 1.3": 1
+    },
+    "protocol_breakdown": {
+      "SMTP": 2,
+      "SMTPS": 1
+    },
+    "anomaly_count": 1,
+    "forward_secrecy_percentage": 33.3
+  },
+  "sessions": [
+    {
+      "session_id": "192.168.1.55:54322-198.51.100.26:25",
+      "protocol": "SMTP",
+      "src_ip": "192.168.1.55",
+      "dst_ip": "198.51.100.26",
+      "tls_version": "None",
+      "negotiated_cipher": "None",
+      "has_forward_secrecy": false,
+      "risk_score": 10.0,
+      "severity": "CRITICAL",
+      "findings": [
+        {
+          "id": "VULN-TLS-010",
+          "severity": "CRITICAL",
+          "title": "No TLS Encryption Detected",
+          "description": "Email session is completely unencrypted. All data including credentials are transmitted in plaintext.",
+          "cve_ids": [],
+          "remediation": "Enable TLS encryption on the mail server."
+        }
+      ],
+      "anomaly_score": 0.0,
+      "is_anomalous": false,
+      "remediations": [
+        {
+          "finding_id": "VULN-TLS-010",
+          "finding_title": "No TLS Encryption Detected",
+          "category": "Enable Encryption",
+          "priority": "IMMEDIATE",
+          "remediation_text": "Enable TLS encryption on the mail server.",
+          "config_snippets": {
+            "Postfix": "# Postfix TLS Protocol Configuration\n# File: /etc/postfix/main.cf\n\n# Enforce TLS 1.2+ for incoming connections\nsmtpd_tls_mandatory_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1\nsmtpd_tls_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1\n\n# Enforce TLS 1.2+ for outgoing connections\nsmtp_tls_mandatory_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1\nsmtp_tls_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1\n\n# Enable opportunistic TLS for outbound\nsmtp_tls_security_level = may\nsmtpd_tls_security_level = may\n\n# Postfix Certificate Configuration\n# File: /etc/postfix/main.cf\n\n# Server certificate and key\nsmtpd_tls_cert_file = /etc/ssl/certs/mail_server.crt\nsmtpd_tls_key_file = /etc/ssl/private/mail_server.key\nsmtpd_tls_CAfile = /etc/ssl/certs/ca-certificates.crt\n\n# Enable certificate verification for outgoing mail\nsmtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt\nsmtp_tls_verify_cert_match = hostname",
+            "Dovecot": "# Dovecot TLS Protocol Configuration\n# File: /etc/dovecot/conf.d/10-ssl.conf\n\nssl = required\n\n# Minimum TLS version\nssl_min_protocol = TLSv1.2\n\n# Dovecot Certificate Configuration\n# File: /etc/dovecot/conf.d/10-ssl.conf\n\nssl_cert = </etc/ssl/certs/mail_server.crt\nssl_key = </etc/ssl/private/mail_server.key\nssl_ca = </etc/ssl/certs/ca-certificates.crt"
+          }
+        }
+      ],
+      "scores": {
+        "tls_version": 0.0,
+        "cipher_strength": 0.0,
+        "key_exchange": 0.0,
+        "certificate_key": 0.0,
+        "signature_algorithm": 0.0
+      }
+    },
+    {
+      "session_id": "198.51.100.26:25-192.168.1.55:54322",
+      "protocol": "SMTP",
+      "src_ip": "198.51.100.26",
+      "dst_ip": "192.168.1.55",
+      "tls_version": "None",
+      "negotiated_cipher": "None",
+      "has_forward_secrecy": false,
+      "risk_score": 10.0,
+      "severity": "CRITICAL",
+      "findings": [
+        {
+          "id": "VULN-TLS-010",
+          "severity": "CRITICAL",
+          "title": "No TLS Encryption Detected",
+          "description": "Email session is completely unencrypted. All data including credentials are transmitted in plaintext.",
+          "cve_ids": [],
+          "remediation": "Enable TLS encryption on the mail server."
+        }
+      ],
+      "anomaly_score": 0.0,
+      "is_anomalous": false,
+      "remediations": [
+        {
+          "finding_id": "VULN-TLS-010",
+          "finding_title": "No TLS Encryption Detected",
+          "category": "Enable Encryption",
+          "priority": "IMMEDIATE",
+          "remediation_text": "Enable TLS encryption on the mail server.",
+          "config_snippets": {
+            "Postfix": "# Postfix TLS Protocol Configuration\n# File: /etc/postfix/main.cf\n\n# Enforce TLS 1.2+ for incoming connections\nsmtpd_tls_mandatory_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1\nsmtpd_tls_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1\n\n# Enforce TLS 1.2+ for outgoing connections\nsmtp_tls_mandatory_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1\nsmtp_tls_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1\n\n# Enable opportunistic TLS for outbound\nsmtp_tls_security_level = may\nsmtpd_tls_security_level = may\n\n# Postfix Certificate Configuration\n# File: /etc/postfix/main.cf\n\n# Server certificate and key\nsmtpd_tls_cert_file = /etc/ssl/certs/mail_server.crt\nsmtpd_tls_key_file = /etc/ssl/private/mail_server.key\nsmtpd_tls_CAfile = /etc/ssl/certs/ca-certificates.crt\n\n# Enable certificate verification for outgoing mail\nsmtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt\nsmtp_tls_verify_cert_match = hostname",
+            "Dovecot": "# Dovecot TLS Protocol Configuration\n# File: /etc/dovecot/conf.d/10-ssl.conf\n\nssl = required\n\n# Minimum TLS version\nssl_min_protocol = TLSv1.2\n\n# Dovecot Certificate Configuration\n# File: /etc/dovecot/conf.d/10-ssl.conf\n\nssl_cert = </etc/ssl/certs/mail_server.crt\nssl_key = </etc/ssl/private/mail_server.key\nssl_ca = </etc/ssl/certs/ca-certificates.crt"
+          }
+        }
+      ],
+      "scores": {
+        "tls_version": 0.0,
+        "cipher_strength": 0.0,
+        "key_exchange": 0.0,
+        "certificate_key": 0.0,
+        "signature_algorithm": 0.0
+      }
+    },
+    {
+      "session_id": "198.51.100.25:465-192.168.1.50:54321",
+      "protocol": "SMTPS",
+      "src_ip": "198.51.100.25",
+      "dst_ip": "192.168.1.50",
+      "tls_version": "TLS 1.3",
+      "negotiated_cipher": "TLS_AES_128_GCM_SHA256",
+      "has_forward_secrecy": true,
+      "risk_score": 1.0,
+      "severity": "INFO",
+      "findings": [],
+      "anomaly_score": 1.0,
+      "is_anomalous": true,
+      "remediations": [],
+      "scores": {
+        "tls_version": 1.0,
+        "cipher_strength": 0.85,
+        "key_exchange": 1.0,
+        "certificate_key": 0.0,
+        "signature_algorithm": 0.0
+      }
+    }
+  ],
+  "anomaly_explanations": [
+    {
+      "session_id": "198.51.100.25:465-192.168.1.50:54321",
+      "anomaly_score": 1.0,
+      "top_deviations": [],
+      "summary": "Anomalous session detected with no clear single factor."
+    }
+  ]
+}

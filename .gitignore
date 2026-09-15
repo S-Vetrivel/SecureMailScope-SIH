@@ -9,7 +9,9 @@ parser/bin/
 
 # Go
 backend/uploads/
-backend/securemailscope.db
+*.db
+sessions.json
+results.json
 
 # Node.js
 dashboard/node_modules/

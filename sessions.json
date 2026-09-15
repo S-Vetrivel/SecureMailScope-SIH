@@ -1,0 +1,61 @@
+{
+  "analysis_id": "analysis_1789480721235",
+  "pcap_file": "testdata/sample_traffic.pcap",
+  "parsed_at": "2026-09-15T19:28:41.235549734+05:30",
+  "total_packets": 15,
+  "total_streams": 3,
+  "sessions": [
+    {
+      "session_id": "192.168.1.55:54322-198.51.100.26:25",
+      "src_ip": "192.168.1.55",
+      "src_port": 54322,
+      "dst_ip": "198.51.100.26",
+      "dst_port": 25,
+      "protocol": "SMTP",
+      "protocol_port": 25,
+      "start_time": "2026-09-15T19:28:41.235400781+05:30",
+      "end_time": "2026-09-15T19:28:41.235486643+05:30",
+      "has_starttls": true,
+      "is_encrypted": true,
+      "raw_banner": "EHLO client.org"
+    },
+    {
+      "session_id": "198.51.100.26:25-192.168.1.55:54322",
+      "src_ip": "198.51.100.26",
+      "src_port": 25,
+      "dst_ip": "192.168.1.55",
+      "dst_port": 54322,
+      "protocol": "SMTP",
+      "protocol_port": 25,
+      "start_time": "2026-09-15T19:28:41.235419126+05:30",
+      "end_time": "2026-09-15T19:28:41.235495853+05:30",
+      "has_starttls": true,
+      "is_encrypted": true,
+      "raw_banner": "220 mail.secure.org ESMTP"
+    },
+    {
+      "session_id": "198.51.100.25:465-192.168.1.50:54321",
+      "src_ip": "198.51.100.25",
+      "src_port": 465,
+      "dst_ip": "192.168.1.50",
+      "dst_port": 54321,
+      "protocol": "SMTPS",
+      "protocol_port": 465,
+      "start_time": "2026-09-15T19:28:41.235359174+05:30",
+      "end_time": "2026-09-15T19:28:41.235498332+05:30",
+      "has_starttls": false,
+      "is_encrypted": true,
+      "tls_handshake": {
+        "client_hello_version": "",
+        "server_hello_version": "TLS 1.2",
+        "negotiated_version": "TLS 1.3",
+        "negotiated_cipher": "TLS_AES_128_GCM_SHA256",
+        "negotiated_cipher_hex": 4865,
+        "cipher_suites_offered": null,
+        "has_forward_secrecy": true,
+        "key_exchange": "ECDHE",
+        "compression_method": 0
+      }
+    }
+  ]
+}

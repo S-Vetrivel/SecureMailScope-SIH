@@ -112,7 +112,13 @@ func CipherSuiteName(code uint16) string {
 
 // HasForwardSecrecy checks if a cipher suite name indicates forward secrecy.
 func HasForwardSecrecy(cipherName string) bool {
-	return strings.Contains(cipherName, "ECDHE") || strings.Contains(cipherName, "DHE")
+	if strings.Contains(cipherName, "ECDHE") || strings.Contains(cipherName, "DHE") {
+		return true
+	}
+	if strings.HasPrefix(cipherName, "TLS_AES_") || strings.HasPrefix(cipherName, "TLS_CHACHA20_") {
+		return true
+	}
+	return false
 }
 
 // KeyExchangeType extracts the key exchange mechanism from a cipher name.
@@ -126,6 +132,8 @@ func KeyExchangeType(cipherName string) string {
 		return "ECDH"
 	case strings.Contains(cipherName, "RSA"):
 		return "RSA"
+	case strings.HasPrefix(cipherName, "TLS_AES_") || strings.HasPrefix(cipherName, "TLS_CHACHA20_"):
+		return "ECDHE"
 	default:
 		return "Unknown"
 	}
