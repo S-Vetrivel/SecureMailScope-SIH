@@ -133,18 +133,29 @@ export default function AnalysisDetailPage() {
         <div className="page-content animate-in">
           {/* Summary Cards */}
           <div className="stats-grid">
-            <div className="card">
-              <div className="card-header">
-                <span className="card-title">Risk Score</span>
-                <Shield size={20} color={scoreColor(data.overall_score || 0)} />
-              </div>
-              <div className="card-value" style={{ color: scoreColor(data.overall_score || 0) }}>
-                {(data.overall_score || 0).toFixed(1)}
-              </div>
-              <span className={`severity-badge ${(data.overall_severity || "INFO").toLowerCase()}`}>
-                {data.overall_severity || "INFO"}
-              </span>
-            </div>
+            {(() => {
+              const maxSessionScore = sessions.reduce((max, s) => Math.max(max, s.risk_score || 0), 0);
+              const score = (data.overall_score && data.overall_score > 0) ? data.overall_score : maxSessionScore;
+              let severity = data.overall_severity || "INFO";
+              if (score >= 9) severity = "CRITICAL";
+              else if (score >= 7) severity = "HIGH";
+              else if (score >= 5) severity = "MEDIUM";
+              else if (score >= 3) severity = "LOW";
+              return (
+                <div className="card">
+                  <div className="card-header">
+                    <span className="card-title">Risk Score</span>
+                    <Shield size={20} color={scoreColor(score)} />
+                  </div>
+                  <div className="card-value" style={{ color: scoreColor(score) }}>
+                    {score.toFixed(1)}
+                  </div>
+                  <span className={`severity-badge ${severity.toLowerCase()}`}>
+                    {severity}
+                  </span>
+                </div>
+              );
+            })()}
 
             <div className="card">
               <div className="card-header">
@@ -212,9 +223,18 @@ export default function AnalysisDetailPage() {
               </div>
               <ResponsiveContainer width="100%" height={260}>
                 {(() => {
-                  const breakdown = data.severity_breakdown && Object.keys(data.severity_breakdown).length > 0
-                    ? data.severity_breakdown
-                    : { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 };
+                  let breakdown = data.severity_breakdown;
+                  if (!breakdown || Object.keys(breakdown).length === 0) {
+                    if (allFindings.length > 0) {
+                      breakdown = {};
+                      allFindings.forEach((f) => {
+                        const sev = f.severity || "INFO";
+                        breakdown[sev] = (breakdown[sev] || 0) + 1;
+                      });
+                    } else {
+                      breakdown = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0, INFO: 0 };
+                    }
+                  }
                   const chartData = Object.entries(breakdown).map(([name, value]) => ({
                     name,
                     value,

@@ -140,7 +140,7 @@ func (s *Service) ExecutePipeline(id string) error {
 	severityBreakdown := make(map[string]int)
 
 	for idx, stream := range streams {
-		sessionID := fmt.Sprintf("S%03d", idx+1)
+		sessionID := fmt.Sprintf("%s-S%03d", id, idx+1)
 		det := detector.Detect(stream.ClientPort, stream.ServerPort, stream.FullPayload)
 		starttlsInfo := starttlsAnalyzer.Analyze(det.Protocol, stream.ClientPayload, stream.ServerPayload)
 
@@ -224,7 +224,12 @@ func (s *Service) ExecutePipeline(id string) error {
 
 // populateFlatFields fills dashboard-friendly flat fields from nested data
 func populateFlatFields(s *models.EmailSession) {
-	s.SessionID = s.ID
+	parts := strings.Split(s.ID, "-")
+	if len(parts) > 0 {
+		s.SessionID = parts[len(parts)-1]
+	} else {
+		s.SessionID = s.ID
+	}
 	s.SrcIP = s.Client.IP
 	s.DstIP = s.Server.IP
 

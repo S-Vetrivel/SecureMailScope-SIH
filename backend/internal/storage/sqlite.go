@@ -81,6 +81,9 @@ func (r *Repository) initSchema() error {
 		tls_json TEXT,
 		certificate_json TEXT,
 		forward_secrecy TEXT NOT NULL,
+		anomaly_score REAL DEFAULT 0,
+		is_anomalous INTEGER DEFAULT 0,
+		scores_json TEXT DEFAULT '{}',
 		FOREIGN KEY(analysis_id) REFERENCES analyses(id) ON DELETE CASCADE
 	);
 
@@ -218,15 +221,21 @@ func (r *Repository) SaveSession(s *models.EmailSession) error {
 	if s.ReassemblyGap {
 		reassemblyGap = 1
 	}
+	isAnomalousInt := 0
+	if s.IsAnomalous {
+		isAnomalousInt = 1
+	}
+	scoresJSON, _ := json.Marshal(s.Scores)
 
 	query := `INSERT OR REPLACE INTO sessions 
-	(id, analysis_id, client_ip, client_port, server_ip, server_port, protocol, start_time, end_time, packet_count, client_bytes, server_bytes, stream_complete, reassembly_gap, starttls_json, tls_json, certificate_json, forward_secrecy)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	(id, analysis_id, client_ip, client_port, server_ip, server_port, protocol, start_time, end_time, packet_count, client_bytes, server_bytes, stream_complete, reassembly_gap, starttls_json, tls_json, certificate_json, forward_secrecy, anomaly_score, is_anomalous, scores_json)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	_, err := r.db.Exec(query,
 		s.ID, s.AnalysisID, s.Client.IP, s.Client.Port, s.Server.IP, s.Server.Port,
 		string(s.Protocol), s.StartTime, s.EndTime, s.PacketCount, s.ClientBytes, s.ServerBytes,
 		streamComplete, reassemblyGap, string(startTLSJSON), string(tlsJSON), string(certJSON), string(s.ForwardSecrecy),
+		s.AnomalyScore, isAnomalousInt, string(scoresJSON),
 	)
 	if err != nil {
 		return err
@@ -250,7 +259,7 @@ func (r *Repository) SaveFinding(analysisID string, f *models.Finding) error {
 }
 
 func (r *Repository) GetSessionsForAnalysis(analysisID string) ([]models.EmailSession, error) {
-	query := `SELECT id, analysis_id, client_ip, client_port, server_ip, server_port, protocol, start_time, end_time, packet_count, client_bytes, server_bytes, stream_complete, reassembly_gap, starttls_json, tls_json, certificate_json, forward_secrecy FROM sessions WHERE analysis_id = ?`
+	query := `SELECT id, analysis_id, client_ip, client_port, server_ip, server_port, protocol, start_time, end_time, packet_count, client_bytes, server_bytes, stream_complete, reassembly_gap, starttls_json, tls_json, certificate_json, forward_secrecy, anomaly_score, is_anomalous, scores_json FROM sessions WHERE analysis_id = ?`
 	rows, err := r.db.Query(query, analysisID)
 	if err != nil {
 		return nil, err
@@ -260,13 +269,14 @@ func (r *Repository) GetSessionsForAnalysis(analysisID string) ([]models.EmailSe
 	var sessions []models.EmailSession
 	for rows.Next() {
 		var s models.EmailSession
-		var protoStr, fwSecStr, starttlsStr, tlsStr, certStr string
-		var streamCompleteInt, reassemblyGapInt int
+		var protoStr, fwSecStr, starttlsStr, tlsStr, certStr, scoresStr string
+		var streamCompleteInt, reassemblyGapInt, isAnomalousInt int
 
 		err := rows.Scan(
 			&s.ID, &s.AnalysisID, &s.Client.IP, &s.Client.Port, &s.Server.IP, &s.Server.Port,
 			&protoStr, &s.StartTime, &s.EndTime, &s.PacketCount, &s.ClientBytes, &s.ServerBytes,
 			&streamCompleteInt, &reassemblyGapInt, &starttlsStr, &tlsStr, &certStr, &fwSecStr,
+			&s.AnomalyScore, &isAnomalousInt, &scoresStr,
 		)
 		if err != nil {
 			return nil, err
@@ -276,6 +286,7 @@ func (r *Repository) GetSessionsForAnalysis(analysisID string) ([]models.EmailSe
 		s.ForwardSecrecy = models.ForwardSecrecyStatus(fwSecStr)
 		s.StreamComplete = streamCompleteInt == 1
 		s.ReassemblyGap = reassemblyGapInt == 1
+		s.IsAnomalous = isAnomalousInt == 1
 
 		if starttlsStr != "" {
 			_ = json.Unmarshal([]byte(starttlsStr), &s.StartTLS)
@@ -291,6 +302,9 @@ func (r *Repository) GetSessionsForAnalysis(analysisID string) ([]models.EmailSe
 			if json.Unmarshal([]byte(certStr), &c) == nil {
 				s.Certificate = &c
 			}
+		}
+		if scoresStr != "" {
+			_ = json.Unmarshal([]byte(scoresStr), &s.Scores)
 		}
 
 		findings, _ := r.GetFindingsForSession(s.ID)

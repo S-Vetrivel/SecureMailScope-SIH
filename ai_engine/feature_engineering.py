@@ -154,77 +154,73 @@ def score_signature_algorithm(algo: str) -> float:
 def extract_session_features(session: dict[str, Any]) -> dict[str, Any]:
     """
     Extract numerical features from a single parsed email session.
+    Supports both Go backend EmailSession JSON format and legacy parser format.
 
     Returns a flat dictionary of feature name -> float value.
     """
+    session_id = session.get("session_id") or session.get("id") or ""
+    protocol = session.get("protocol") or "Unknown"
+    src_ip = session.get("src_ip") or (session.get("client") or {}).get("ip") or ""
+    dst_ip = session.get("dst_ip") or (session.get("server") or {}).get("ip") or ""
+
     features: dict[str, Any] = {
-        "session_id": session.get("session_id", ""),
-        "protocol": session.get("protocol", "Unknown"),
-        "src_ip": session.get("src_ip", ""),
-        "dst_ip": session.get("dst_ip", ""),
+        "session_id": session_id,
+        "protocol": protocol,
+        "src_ip": src_ip,
+        "dst_ip": dst_ip,
     }
 
     # ---- TLS Handshake Features ----
     hs = session.get("tls_handshake")
-    if hs:
-        neg_version = hs.get("negotiated_version", "")
-        features["tls_version"] = neg_version
-        features["tls_version_score"] = TLS_VERSION_SCORES.get(neg_version, 0.0)
+    tls = session.get("tls")
 
-        cipher = hs.get("negotiated_cipher", "")
-        features["negotiated_cipher"] = cipher
-        features["cipher_strength_score"] = score_cipher_strength(cipher)
+    neg_version = session.get("tls_version") or (tls.get("version") if tls else None) or (hs.get("negotiated_version") if hs else None) or "None"
+    cipher = session.get("negotiated_cipher") or (tls.get("cipher_suite") if tls else None) or (hs.get("negotiated_cipher") if hs else None) or "None"
+    
+    fs_val = session.get("has_forward_secrecy")
+    if fs_val is None:
+        fs_val = session.get("forward_secrecy") == "YES" or (hs.get("has_forward_secrecy") if hs else False)
 
-        features["has_forward_secrecy"] = 1.0 if hs.get("has_forward_secrecy", False) else 0.0
+    features["tls_version"] = neg_version
+    features["tls_version_score"] = TLS_VERSION_SCORES.get(neg_version, 0.0)
+    features["negotiated_cipher"] = cipher
+    features["cipher_strength_score"] = score_cipher_strength(cipher)
+    features["has_forward_secrecy"] = 1.0 if fs_val else 0.0
 
-        kex = hs.get("key_exchange", "")
-        features["key_exchange"] = kex
-        features["key_exchange_score"] = 1.0 if kex in ("ECDHE", "DHE") else 0.3 if kex == "ECDH" else 0.0
+    kex = (tls.get("key_exchange") if tls else None) or (hs.get("key_exchange") if hs else None) or "None"
+    features["key_exchange"] = kex
+    features["key_exchange_score"] = 1.0 if (kex in ("ECDHE", "DHE") or fs_val) else 0.3 if kex == "ECDH" else 0.0
 
-        features["compression_enabled"] = 1.0 if hs.get("compression_method", 0) != 0 else 0.0
-
-        # Count offered cipher suites (many weak ones = red flag)
-        offered = hs.get("cipher_suites_offered") or []
-        features["num_cipher_suites_offered"] = len(offered)
-
-        # Count weak ciphers in offered list
-        weak_count = sum(1 for c in (offered or []) if any(w in (c or "").upper() for w in ["NULL", "RC4", "DES", "EXPORT", "3DES"]))
-        features["weak_ciphers_offered_count"] = weak_count
-        features["weak_ciphers_offered_ratio"] = weak_count / max(len(offered), 1)
-    else:
-        features["tls_version"] = "None"
-        features["tls_version_score"] = 0.0
-        features["negotiated_cipher"] = "None"
-        features["cipher_strength_score"] = 0.0
-        features["has_forward_secrecy"] = 0.0
-        features["key_exchange"] = "None"
-        features["key_exchange_score"] = 0.0
-        features["compression_enabled"] = 0.0
-        features["num_cipher_suites_offered"] = 0
-        features["weak_ciphers_offered_count"] = 0
-        features["weak_ciphers_offered_ratio"] = 0.0
+    features["compression_enabled"] = 1.0 if hs and hs.get("compression_method", 0) != 0 else 0.0
+    offered = (hs.get("cipher_suites_offered") if hs else None) or []
+    features["num_cipher_suites_offered"] = len(offered)
+    weak_count = sum(1 for c in (offered or []) if any(w in (c or "").upper() for w in ["NULL", "RC4", "DES", "EXPORT", "3DES"]))
+    features["weak_ciphers_offered_count"] = weak_count
+    features["weak_ciphers_offered_ratio"] = weak_count / max(len(offered), 1)
 
     # ---- Certificate Features ----
     certs = session.get("certificates", [])
-    if certs:
-        # Use the leaf certificate (first in chain)
-        leaf = certs[0]
+    cert_obj = session.get("certificate") or (certs[0] if certs else None)
+    if cert_obj:
+        bits = cert_obj.get("public_key_bit_length") or cert_obj.get("key_bits") or 0
+        sig_algo = cert_obj.get("signature_algorithm") or ""
+        is_expired = cert_obj.get("is_expired") if "is_expired" in cert_obj else cert_obj.get("expired", False)
+        is_self_signed = cert_obj.get("is_self_signed", False)
 
-        features["cert_key_bits"] = leaf.get("public_key_bit_length", 0)
-        features["cert_key_length_score"] = score_key_length(leaf.get("public_key_bit_length", 0))
-        features["cert_sig_algo"] = leaf.get("signature_algorithm", "")
-        features["cert_sig_algo_score"] = score_signature_algorithm(leaf.get("signature_algorithm", ""))
-        features["cert_is_self_signed"] = 1.0 if leaf.get("is_self_signed", False) else 0.0
-        features["cert_is_expired"] = 1.0 if leaf.get("is_expired", False) else 0.0
-        features["cert_is_weak_key"] = 1.0 if leaf.get("is_weak_key", False) else 0.0
-        features["cert_is_weak_signature"] = 1.0 if leaf.get("is_weak_signature", False) else 0.0
+        features["cert_key_bits"] = bits
+        features["cert_key_length_score"] = score_key_length(bits)
+        features["cert_sig_algo"] = sig_algo
+        features["cert_sig_algo_score"] = score_signature_algorithm(sig_algo)
+        features["cert_is_self_signed"] = 1.0 if is_self_signed else 0.0
+        features["cert_is_expired"] = 1.0 if is_expired else 0.0
+        features["cert_is_weak_key"] = 1.0 if bits > 0 and bits < 2048 else 0.0
+        features["cert_is_weak_signature"] = 1.0 if "md5" in sig_algo.lower() or "sha1" in sig_algo.lower() else 0.0
 
-        # Days until expiration
-        not_after = leaf.get("not_after", "")
+        not_after = cert_obj.get("not_after", "")
         if not_after:
             try:
                 from datetime import datetime, timezone
-                exp = datetime.fromisoformat(not_after.replace("Z", "+00:00"))
+                exp = datetime.fromisoformat(str(not_after).replace("Z", "+00:00"))
                 days_left = (exp - datetime.now(timezone.utc)).days
                 features["cert_days_until_expiry"] = days_left
             except (ValueError, TypeError):
@@ -232,7 +228,7 @@ def extract_session_features(session: dict[str, Any]) -> dict[str, Any]:
         else:
             features["cert_days_until_expiry"] = 0
 
-        features["cert_chain_length"] = len(certs)
+        features["cert_chain_length"] = len(certs) if certs else 1
     else:
         features["cert_key_bits"] = 0
         features["cert_key_length_score"] = 0.0
@@ -246,8 +242,12 @@ def extract_session_features(session: dict[str, Any]) -> dict[str, Any]:
         features["cert_chain_length"] = 0
 
     # ---- Protocol Features ----
-    features["has_starttls"] = 1.0 if session.get("has_starttls", False) else 0.0
-    features["is_encrypted"] = 1.0 if session.get("is_encrypted", False) else 0.0
+    starttls = session.get("starttls") or {}
+    has_starttls = session.get("has_starttls") or starttls.get("supported", False) or starttls.get("tls_established", False)
+    is_encrypted = session.get("is_encrypted") or (neg_version != "None" and neg_version != "")
+
+    features["has_starttls"] = 1.0 if has_starttls else 0.0
+    features["is_encrypted"] = 1.0 if is_encrypted else 0.0
 
     return features
 
