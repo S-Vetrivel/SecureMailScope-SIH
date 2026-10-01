@@ -113,6 +113,7 @@ func (r *Repository) initSchema() error {
 	}
 	// Idempotent migrations for new columns
 	_, _ = r.db.Exec(`ALTER TABLE sessions ADD COLUMN ai_assessment TEXT DEFAULT ''`)
+	_, _ = r.db.Exec(`ALTER TABLE sessions ADD COLUMN ai_assessment_structured TEXT DEFAULT ''`)
 	_, _ = r.db.Exec(`ALTER TABLE sessions ADD COLUMN remediations_json TEXT DEFAULT '[]'`)
 	_, _ = r.db.Exec(`ALTER TABLE analyses ADD COLUMN global_ai_assessment TEXT DEFAULT ''`)
 	return nil
@@ -246,16 +247,17 @@ func (r *Repository) SaveSession(s *models.EmailSession) error {
 	}
 	scoresJSON, _ := json.Marshal(s.Scores)
 	remediationsJSON, _ := json.Marshal(s.Remediations)
+	aiStructuredJSON, _ := json.Marshal(s.AIAssessmentStructured)
 
 	query := `INSERT OR REPLACE INTO sessions 
-	(id, analysis_id, client_ip, client_port, server_ip, server_port, protocol, start_time, end_time, packet_count, client_bytes, server_bytes, stream_complete, reassembly_gap, starttls_json, tls_json, certificate_json, forward_secrecy, anomaly_score, is_anomalous, scores_json, ai_assessment, remediations_json)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	(id, analysis_id, client_ip, client_port, server_ip, server_port, protocol, start_time, end_time, packet_count, client_bytes, server_bytes, stream_complete, reassembly_gap, starttls_json, tls_json, certificate_json, forward_secrecy, anomaly_score, is_anomalous, scores_json, ai_assessment, ai_assessment_structured, remediations_json)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	_, err := r.db.Exec(query,
 		s.ID, s.AnalysisID, s.Client.IP, s.Client.Port, s.Server.IP, s.Server.Port,
 		string(s.Protocol), s.StartTime, s.EndTime, s.PacketCount, s.ClientBytes, s.ServerBytes,
 		streamComplete, reassemblyGap, string(startTLSJSON), string(tlsJSON), string(certJSON), string(s.ForwardSecrecy),
-		s.AnomalyScore, isAnomalousInt, string(scoresJSON), s.AIAssessment, string(remediationsJSON),
+		s.AnomalyScore, isAnomalousInt, string(scoresJSON), s.AIAssessment, string(aiStructuredJSON), string(remediationsJSON),
 	)
 	if err != nil {
 		return err
@@ -279,7 +281,7 @@ func (r *Repository) SaveFinding(analysisID string, f *models.Finding) error {
 }
 
 func (r *Repository) GetSessionsForAnalysis(analysisID string) ([]models.EmailSession, error) {
-	query := `SELECT id, analysis_id, client_ip, client_port, server_ip, server_port, protocol, start_time, end_time, packet_count, client_bytes, server_bytes, stream_complete, reassembly_gap, starttls_json, tls_json, certificate_json, forward_secrecy, anomaly_score, is_anomalous, scores_json, COALESCE(ai_assessment,'') as ai_assessment, COALESCE(remediations_json,'[]') as remediations_json FROM sessions WHERE analysis_id = ?`
+	query := `SELECT id, analysis_id, client_ip, client_port, server_ip, server_port, protocol, start_time, end_time, packet_count, client_bytes, server_bytes, stream_complete, reassembly_gap, starttls_json, tls_json, certificate_json, forward_secrecy, anomaly_score, is_anomalous, scores_json, COALESCE(ai_assessment,'') as ai_assessment, COALESCE(ai_assessment_structured,'') as ai_assessment_structured, COALESCE(remediations_json,'[]') as remediations_json FROM sessions WHERE analysis_id = ?`
 	rows, err := r.db.Query(query, analysisID)
 	if err != nil {
 		return nil, err
@@ -289,14 +291,14 @@ func (r *Repository) GetSessionsForAnalysis(analysisID string) ([]models.EmailSe
 	var sessions []models.EmailSession
 	for rows.Next() {
 		var s models.EmailSession
-		var protoStr, fwSecStr, starttlsStr, tlsStr, certStr, scoresStr, aiAssessment, remediationsStr string
+		var protoStr, fwSecStr, starttlsStr, tlsStr, certStr, scoresStr, aiAssessment, aiAssessmentStructured, remediationsStr string
 		var streamCompleteInt, reassemblyGapInt, isAnomalousInt int
 
 		err := rows.Scan(
 			&s.ID, &s.AnalysisID, &s.Client.IP, &s.Client.Port, &s.Server.IP, &s.Server.Port,
 			&protoStr, &s.StartTime, &s.EndTime, &s.PacketCount, &s.ClientBytes, &s.ServerBytes,
 			&streamCompleteInt, &reassemblyGapInt, &starttlsStr, &tlsStr, &certStr, &fwSecStr,
-			&s.AnomalyScore, &isAnomalousInt, &scoresStr, &aiAssessment, &remediationsStr,
+			&s.AnomalyScore, &isAnomalousInt, &scoresStr, &aiAssessment, &aiAssessmentStructured, &remediationsStr,
 		)
 		if err != nil {
 			return nil, err
@@ -327,6 +329,12 @@ func (r *Repository) GetSessionsForAnalysis(analysisID string) ([]models.EmailSe
 			_ = json.Unmarshal([]byte(scoresStr), &s.Scores)
 		}
 		s.AIAssessment = aiAssessment
+		if aiAssessmentStructured != "" && aiAssessmentStructured != "{}" && aiAssessmentStructured != "null" {
+			var aiStruct models.AIAssessmentResult
+			if json.Unmarshal([]byte(aiAssessmentStructured), &aiStruct) == nil {
+				s.AIAssessmentStructured = &aiStruct
+			}
+		}
 		if remediationsStr != "" && remediationsStr != "[]" && remediationsStr != "null" {
 			_ = json.Unmarshal([]byte(remediationsStr), &s.Remediations)
 		}
@@ -367,17 +375,18 @@ func (r *Repository) GetSessionsForAnalysis(analysisID string) ([]models.EmailSe
 }
 
 func (r *Repository) GetSession(sessionID string) (*models.EmailSession, error) {
-	query := `SELECT id, analysis_id, client_ip, client_port, server_ip, server_port, protocol, start_time, end_time, packet_count, client_bytes, server_bytes, stream_complete, reassembly_gap, starttls_json, tls_json, certificate_json, forward_secrecy FROM sessions WHERE id = ?`
+	query := `SELECT id, analysis_id, client_ip, client_port, server_ip, server_port, protocol, start_time, end_time, packet_count, client_bytes, server_bytes, stream_complete, reassembly_gap, starttls_json, tls_json, certificate_json, forward_secrecy, anomaly_score, is_anomalous, scores_json, COALESCE(ai_assessment,'') as ai_assessment, COALESCE(ai_assessment_structured,'') as ai_assessment_structured, COALESCE(remediations_json,'[]') as remediations_json FROM sessions WHERE id = ?`
 	row := r.db.QueryRow(query, sessionID)
 
 	var s models.EmailSession
-	var protoStr, fwSecStr, starttlsStr, tlsStr, certStr string
-	var streamCompleteInt, reassemblyGapInt int
+	var protoStr, fwSecStr, starttlsStr, tlsStr, certStr, scoresStr, aiAssessment, aiAssessmentStructured, remediationsStr string
+	var streamCompleteInt, reassemblyGapInt, isAnomalousInt int
 
 	err := row.Scan(
 		&s.ID, &s.AnalysisID, &s.Client.IP, &s.Client.Port, &s.Server.IP, &s.Server.Port,
 		&protoStr, &s.StartTime, &s.EndTime, &s.PacketCount, &s.ClientBytes, &s.ServerBytes,
 		&streamCompleteInt, &reassemblyGapInt, &starttlsStr, &tlsStr, &certStr, &fwSecStr,
+		&s.AnomalyScore, &isAnomalousInt, &scoresStr, &aiAssessment, &aiAssessmentStructured, &remediationsStr,
 	)
 	if err != nil {
 		return nil, err
@@ -402,6 +411,20 @@ func (r *Repository) GetSession(sessionID string) (*models.EmailSession, error) 
 		if json.Unmarshal([]byte(certStr), &c) == nil {
 			s.Certificate = &c
 		}
+	}
+	s.IsAnomalous = isAnomalousInt == 1
+	if scoresStr != "" {
+		_ = json.Unmarshal([]byte(scoresStr), &s.Scores)
+	}
+	s.AIAssessment = aiAssessment
+	if aiAssessmentStructured != "" && aiAssessmentStructured != "{}" && aiAssessmentStructured != "null" {
+		var aiStruct models.AIAssessmentResult
+		if json.Unmarshal([]byte(aiAssessmentStructured), &aiStruct) == nil {
+			s.AIAssessmentStructured = &aiStruct
+		}
+	}
+	if remediationsStr != "" && remediationsStr != "[]" && remediationsStr != "null" {
+		_ = json.Unmarshal([]byte(remediationsStr), &s.Remediations)
 	}
 
 	findings, _ := r.GetFindingsForSession(s.ID)

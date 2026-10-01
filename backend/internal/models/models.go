@@ -109,11 +109,18 @@ type TLSInfo struct {
 	ALPN               string   `json:"alpn,omitempty"`
 	KeyExchangeGroup   string   `json:"key_exchange_group,omitempty"`
 	SignatureAlgorithm string   `json:"signature_algorithm,omitempty"`
-	HandshakeSucceeded bool     `json:"handshake_succeeded"`
-	CertificateSeen    bool     `json:"certificate_seen"`
 	AlertCount         int      `json:"alert_count"`
 	StreamID           int      `json:"stream_id"`
-	Complete           bool     `json:"complete"`
+	ClientIP           string   `json:"client_ip,omitempty"`
+	ClientPort         uint16   `json:"client_port,omitempty"`
+	ServerIP           string   `json:"server_ip,omitempty"`
+	ServerPort         uint16   `json:"server_port,omitempty"`
+	TLSObserved        bool     `json:"tls_observed"`
+	ServerHelloSeen    bool     `json:"server_hello_seen"`
+	CertificateSeen    bool     `json:"certificate_seen"`
+	HandshakeFailed    bool     `json:"handshake_failed"`
+	HandshakeCompleted bool     `json:"handshake_completed"`
+	AppDataObserved    bool     `json:"app_data_observed"`
 	RawCertificates    []string `json:"-"`
 }
 
@@ -184,9 +191,24 @@ type EmailSession struct {
 	HasForwardSecrecy  bool    `json:"has_forward_secrecy"`
 	IsAnomalous        bool    `json:"is_anomalous"`
 	AnomalyScore       float64 `json:"anomaly_score"`
-	Scores             SessionScores `json:"scores"`
-	Remediations       []interface{} `json:"remediations,omitempty"`
-	AIAssessment       string        `json:"ai_assessment,omitempty"`
+	Scores                 SessionScores          `json:"scores"`
+	Remediations           []interface{}          `json:"remediations,omitempty"`
+	AIAssessment           string                 `json:"ai_assessment,omitempty"`
+	AIAssessmentStructured *AIAssessmentResult    `json:"ai_assessment_structured,omitempty"`
+}
+
+type EvidenceCorrelation struct {
+	EvidenceName        string `json:"evidence_name"`
+	Observation         string `json:"observation"`
+	SecurityImplication string `json:"security_implication"`
+}
+
+type AIAssessmentResult struct {
+	ExecutiveInterpretation string                `json:"executive_interpretation"`
+	EvidenceCorrelation     []EvidenceCorrelation `json:"evidence_correlation"`
+	AIReasoning             string                `json:"ai_reasoning"`
+	Priority                string                `json:"priority"`
+	RecommendedActions      []string              `json:"recommended_actions"`
 }
 
 // SessionScores drives the Security Radar chart

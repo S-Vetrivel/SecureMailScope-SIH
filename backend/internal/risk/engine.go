@@ -165,7 +165,7 @@ func (e *Engine) Assess(session models.EmailSession) []models.Finding {
 		}
 
 		// TLS Handshake Failure / Alerts
-		if session.TLS.AlertCount > 0 || !session.TLS.HandshakeSucceeded {
+		if session.TLS.AlertCount > 0 || session.TLS.HandshakeFailed {
 			findings = append(findings, models.Finding{
 				ID:          fmt.Sprintf("TLS-FAIL-001-%s", session.ID),
 				Title:       "TLS Handshake Failure / Alert",
@@ -173,7 +173,7 @@ func (e *Engine) Assess(session models.EmailSession) []models.Finding {
 				Category:    "TLS",
 				SessionID:   session.ID,
 				Description: "The TLS handshake failed or generated alert messages.",
-				Evidence:    []string{fmt.Sprintf("Alert Count: %d", session.TLS.AlertCount), fmt.Sprintf("Handshake Succeeded: %t", session.TLS.HandshakeSucceeded)},
+				Evidence:    []string{fmt.Sprintf("Alert Count: %d", session.TLS.AlertCount), fmt.Sprintf("Handshake Failed: %t", session.TLS.HandshakeFailed)},
 				Recommendation: "Investigate TLS connectivity issues, possible certificate trust errors on client, or incompatible ciphers.",
 			})
 		}

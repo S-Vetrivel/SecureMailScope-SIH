@@ -18,14 +18,27 @@ def get_ollama_model():
 
 def generate_llm_assessment(evidence: dict) -> dict:
     prompt = f"""You are a cybersecurity expert analyzing an email server TLS session.
-Here are the facts extracted from the PCAP traffic:
+Here are the exact facts extracted from the PCAP traffic:
 {json.dumps(evidence, indent=2)}
 
-Analyze the security posture of this session. Respond ONLY with a valid JSON object matching this schema exactly (no markdown formatting, no backticks, just raw JSON):
+Analyze the security posture of this session based strictly on the provided evidence. 
+Do NOT hallucinate or invent details that are not in the evidence (e.g., do not claim a protocol is used if the timeline shows otherwise). 
+Respond ONLY with a valid JSON object matching this schema exactly (no markdown formatting, no backticks, just raw JSON):
 {{
-  "ai_assessment": "Detailed paragraph explaining the security posture, reasoning, and correlation of any issues.",
-  "root_cause": "Technical root cause if vulnerable, or 'Secure configuration' if safe",
-  "remediation": "Recommended fix if vulnerable, or 'No action required' if safe"
+  "executive_interpretation": "A 2-3 sentence summary of the session's overall security posture.",
+  "evidence_correlation": [
+    {{
+      "evidence_name": "e.g., TLS Version",
+      "observation": "e.g., TLS 1.0",
+      "security_implication": "e.g., Deprecated protocol"
+    }}
+  ],
+  "ai_reasoning": "A paragraph explaining how the individual observations combine into the overall security posture. Clearly distinguish between OBSERVED facts and INFERRED conclusions.",
+  "priority": "CRITICAL, HIGH, MEDIUM, LOW, or SECURE",
+  "recommended_actions": [
+    "Action 1",
+    "Action 2"
+  ]
 }}
 """
     model = get_ollama_model()
@@ -38,16 +51,18 @@ Analyze the security posture of this session. Respond ONLY with a valid JSON obj
     }
     
     fallback = {
-        "ai_assessment": "Session assessed (LLM unavailable/timeout) \u2014 no significant cryptographic anomalies detected.",
-        "root_cause": "N/A",
-        "remediation": "N/A"
+        "executive_interpretation": "Session assessed (LLM unavailable/timeout) \u2014 no significant cryptographic anomalies detected.",
+        "evidence_correlation": [],
+        "ai_reasoning": "The AI reasoning engine was unavailable or timed out.",
+        "priority": "UNKNOWN",
+        "recommended_actions": []
     }
 
     try:
         r = requests.post(url, json=payload, timeout=20)
         r.raise_for_status()
         resp_json = json.loads(r.json().get("response", "{}"))
-        if "ai_assessment" in resp_json:
+        if "executive_interpretation" in resp_json:
             return resp_json
     except Exception as e:
         print(f"  [!] Ollama API failed or timed out: {e}", file=sys.stderr)
@@ -56,12 +71,13 @@ Analyze the security posture of this session. Respond ONLY with a valid JSON obj
 
 def generate_global_assessment_stream(sessions_evidence: list) -> str:
     prompt = f"""You are a cybersecurity expert analyzing a complete network packet capture (PCAP) of email traffic.
-Here are the aggregated details from all sessions in this capture:
+Here are the exact aggregated details from all sessions in this capture:
 {json.dumps(sessions_evidence, indent=2)}
 
 Provide a comprehensive, executive-level AI security assessment of this entire PCAP. 
 Highlight the overall security posture, any critical findings, and justify the risk score.
 Write in a professional, clear markdown format.
+Do NOT hallucinate or invent details that are not in the provided evidence. Base your conclusions strictly on the facts presented.
 """
     model = get_ollama_model()
     url = "http://localhost:11434/api/generate"

@@ -114,51 +114,14 @@ export default function AnalysisDetailPage() {
     (s.findings || []).map((f) => ({ ...f, session_id: s.session_id }))
   );
 
-  // Calculate sub-scores deterministically for the Radar chart
-  const getScore = (s, category) => {
-    if (category === "tls_version") {
-      if (!s.tls_version) return 0;
-      if (s.tls_version === "TLS 1.3") return 10;
-      if (s.tls_version === "TLS 1.2") return 8;
-      return 3;
-    }
-    if (category === "cipher") {
-      const c = s.negotiated_cipher || "";
-      if (!c) return 0;
-      if (c.includes("GCM") || c.includes("CHACHA20")) return 10;
-      if (c.includes("CBC")) return 6;
-      if (c.includes("RC4") || c.includes("NULL")) return 1;
-      return 5;
-    }
-    if (category === "kex") {
-      return s.has_forward_secrecy ? 10 : (s.tls_version ? 4 : 0);
-    }
-    if (category === "cert") {
-      const bits = s.certificate?.key_length || 0;
-      if (bits >= 4096) return 10;
-      if (bits >= 2048) return 8;
-      if (bits >= 1024) return 4;
-      return 0;
-    }
-    if (category === "sig") {
-      const sig = s.certificate?.signature_algorithm?.toLowerCase() || "";
-      if (sig.includes("sha384") || sig.includes("sha512") || sig.includes("ecdsa")) return 10;
-      if (sig.includes("sha256")) return 8;
-      if (sig.includes("sha1")) return 3;
-      if (sig.includes("md5")) return 1;
-      return 0;
-    }
-    return 0;
-  };
-
   const radarData =
     sessions.length > 0
       ? [
-          { subject: "TLS Version", value: avg(sessions, (s) => getScore(s, "tls_version")) * 10 },
-          { subject: "Cipher Strength", value: avg(sessions, (s) => getScore(s, "cipher")) * 10 },
-          { subject: "Key Exchange", value: avg(sessions, (s) => getScore(s, "kex")) * 10 },
-          { subject: "Certificate", value: avg(sessions, (s) => getScore(s, "cert")) * 10 },
-          { subject: "Signature", value: avg(sessions, (s) => getScore(s, "sig")) * 10 },
+          { subject: "TLS Version", value: avg(sessions, (s) => (s.scores?.tls_version || 0) * 100) },
+          { subject: "Cipher Strength", value: avg(sessions, (s) => (s.scores?.cipher_strength || 0) * 100) },
+          { subject: "Key Exchange", value: avg(sessions, (s) => (s.scores?.key_exchange || 0) * 100) },
+          { subject: "Certificate", value: avg(sessions, (s) => (s.scores?.certificate || 0) * 100) },
+          { subject: "Signature", value: avg(sessions, (s) => (s.scores?.signature_algorithm || 0) * 100) },
         ]
       : [];
 
@@ -417,7 +380,7 @@ export default function AnalysisDetailPage() {
                 {tab === "findings" && <Bug size={14} />}
                 {tab === "remediation" && <Wrench size={14} />}
                 {tab === "ai_insights" && <span>🤖</span>}
-                {tab === "ai_insights" ? "AI Insights" : tab} ({tab === "sessions" ? sessions.length : tab === "findings" ? allFindings.length : tab === "remediation" ? sessions.filter((s) => s.remediations?.length).length : tab === "ai_insights" ? (isStreamingAI ? "Streaming..." : "1") : 0})
+                <span style={{ textTransform: "capitalize" }}>{tab === "ai_insights" ? "AI Insights" : tab}</span> ({tab === "sessions" ? sessions.length : tab === "findings" ? allFindings.length : tab === "remediation" ? sessions.filter((s) => s.ai_assessment_structured?.recommended_actions?.length || s.remediations?.length).length : tab === "ai_insights" ? (isStreamingAI ? "Streaming..." : "1") : 0})
               </button>
             ))}
           </div>
@@ -473,162 +436,232 @@ export default function AnalysisDetailPage() {
                   </div>
 
                   {expanded[s.session_id] && (
-                    <div style={{ paddingLeft: 28, marginTop: 12 }}>
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "repeat(4, 1fr)",
-                          gap: 12,
-                          marginBottom: 16,
-                          background: "rgba(15, 23, 42, 0.4)",
-                          padding: 12,
-                          borderRadius: 8,
-                          border: "1px solid var(--border-color)",
-                        }}
-                      >
-                        <div>
-                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
-                            Encryption Status
-                          </div>
-                          <div className="mono" style={{ fontSize: 13, color: (s.tls_version || s.tls?.version) ? "#60a5fa" : "#f97316", fontWeight: 600 }}>
-                            {s.tls_version || s.tls?.version ? `${s.tls_version || s.tls?.version} (Encrypted)` : "Unencrypted Plaintext"}
-                          </div>
+                    <div style={{ paddingLeft: 28, marginTop: 12, display: "flex", flexDirection: "column", gap: 16 }}>
+                      
+                      {/* FORENSIC EVIDENCE & CRYPTOGRAPHIC PARAMETERS */}
+                      <div style={{ background: "rgba(15, 23, 42, 0.4)", borderRadius: 8, border: "1px solid var(--border-color)", overflow: "hidden" }}>
+                        <div style={{ padding: "10px 14px", background: "rgba(255, 255, 255, 0.03)", borderBottom: "1px solid var(--border-color)", fontWeight: 600, fontSize: 13, color: "var(--text-secondary)" }}>
+                          FORENSIC EVIDENCE
+                          <span style={{ fontSize: 11, fontWeight: 400, color: "var(--text-muted)", marginLeft: 8 }}>Directly observed and parsed from the network capture</span>
                         </div>
-                        <div>
-                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
-                            Cipher Suite
+                        <div style={{ padding: 14, display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+                          <div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Protocol</div>
+                            <div className="mono" style={{ fontSize: 13, color: "#e2e8f0" }}>{s.protocol}</div>
                           </div>
-                          <div className="mono" style={{ fontSize: 12, wordBreak: "break-all", color: "#e2e8f0" }}>
-                            {s.negotiated_cipher || s.tls?.cipher_suite || "None (Plaintext Traffic)"}
+                          <div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>STARTTLS</div>
+                            <div className="mono" style={{ fontSize: 13, color: "#e2e8f0" }}>{s.starttls?.accepted ? "Accepted" : s.starttls?.requested ? "Requested" : "None"}</div>
                           </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
-                            Signature Algorithm
+                          <div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>TLS Version</div>
+                            <div className="mono" style={{ fontSize: 13, color: s.tls?.version ? "#60a5fa" : "#f97316" }}>{s.tls?.version || "Unknown"}</div>
                           </div>
-                          <div className="mono" style={{ fontSize: 13, color: "#c084fc" }}>
-                            {s.signature_algorithm || s.tls?.signature_algorithm || "None (Unencrypted)"}
+                          <div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Cipher Suite</div>
+                            <div className="mono" style={{ fontSize: 13, color: s.tls?.cipher_suite ? "#60a5fa" : "#f97316" }}>{s.tls?.cipher_suite || "Unknown"}</div>
                           </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
-                            Key Exchange & PFS
+                          <div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Key Exchange</div>
+                            <div className="mono" style={{ fontSize: 13, color: "#e2e8f0" }}>{s.tls?.key_exchange || "Unknown"}</div>
                           </div>
-                          <div className="mono" style={{ fontSize: 13, color: s.has_forward_secrecy ? "#34d399" : "#fb923c" }}>
-                            {s.tls?.key_exchange ? s.tls.key_exchange : s.has_forward_secrecy ? "ECDHE / PFS" : "None (Plaintext / No TLS)"}
+                          <div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Public Key</div>
+                            <div className="mono" style={{ fontSize: 13, color: "#e2e8f0" }}>{s.certificate?.public_key_algorithm ? `${s.certificate.public_key_algorithm} ${s.certificate.key_length}-bit` : "Unknown"}</div>
                           </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
-                            Certificate Subject
+                          <div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Signature</div>
+                            <div className="mono" style={{ fontSize: 13, color: "#e2e8f0" }}>{s.certificate?.signature_algorithm || "Unknown"}</div>
                           </div>
-                          <div className="mono" style={{ fontSize: 12, color: "#94a3b8" }}>
-                            {s.certificate?.subject || "Not Applicable (No TLS Cert)"}
+                          <div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Forward Secrecy</div>
+                            <div className="mono" style={{ fontSize: 13, color: s.has_forward_secrecy ? "#34d399" : "#f87171" }}>{s.has_forward_secrecy ? "Yes" : "No"}</div>
                           </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
-                            Certificate Issuer
+                          <div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Handshake</div>
+                            <div className="mono" style={{ fontSize: 13, color: s.tls?.handshake_completed ? "#34d399" : s.tls?.handshake_failed ? "#f87171" : "Unknown" }}>
+                              {s.tls?.handshake_completed ? "Completed" : s.tls?.handshake_failed ? "Failed" : "Unknown"}
+                            </div>
                           </div>
-                          <div className="mono" style={{ fontSize: 12, color: "#94a3b8" }}>
-                            {s.certificate?.issuer || "Not Applicable (No TLS Cert)"}
+                          <div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Application Data</div>
+                            <div className="mono" style={{ fontSize: 13, color: s.tls?.app_data_observed ? "#34d399" : "#f97316" }}>
+                              {s.tls?.app_data_observed ? "Observed" : "Not Observed"}
+                            </div>
                           </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
-                            Cert Key Length / Alg
-                          </div>
-                          <div className="mono" style={{ fontSize: 13, color: "#38bdf8" }}>
-                            {s.certificate?.public_key_algorithm ? `${s.certificate.public_key_algorithm} (${s.certificate.key_length} bits)` : "None"}
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
-                            Packet Count
-                          </div>
-                          <div className="mono" style={{ fontSize: 13, color: "#f87171", fontWeight: 600 }}>
-                            {s.packet_count || 0} packets
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
-                            Client / Server Bytes
-                          </div>
-                          <div className="mono" style={{ fontSize: 13, color: "#38bdf8" }}>
-                            {s.client_bytes || 0} B / {s.server_bytes || 0} B
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
-                            Stream Completion / Gaps
-                          </div>
-                          <div className="mono" style={{ fontSize: 13, color: s.stream_complete ? "#34d399" : "#f59e0b" }}>
-                            {s.stream_complete ? "Complete" : "Incomplete"} {s.reassembly_gap ? "(Gaps Detected)" : "(No Gaps)"}
-                          </div>
-                        </div>
-                        <div>
-                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
-                            Session Duration
-                          </div>
-                          <div className="mono" style={{ fontSize: 12, color: "#94a3b8" }}>
-                            {s.start_time ? new Date(s.start_time).toLocaleTimeString() : "N/A"} - {s.end_time ? new Date(s.end_time).toLocaleTimeString() : "N/A"}
+                          <div>
+                            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Capture Completeness</div>
+                            <div className="mono" style={{ fontSize: 13, color: s.stream_complete ? "#34d399" : "#f59e0b" }}>
+                              {s.stream_complete ? "Complete" : "Incomplete (Gap Detected)"}
+                            </div>
                           </div>
                         </div>
                       </div>
-
-                      {s.ai_assessment && (
-                        <div style={{ marginTop: 14, padding: "12px 16px", background: "rgba(59, 130, 246, 0.08)", borderRadius: 8, border: "1px solid rgba(59, 130, 246, 0.2)" }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: "#60a5fa", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.08em", display: "flex", alignItems: "center", gap: 6 }}>
-                            <span>🤖</span> AI Security Assessment
-                          </div>
-                          <div style={{ fontSize: 13, color: "#cbd5e1", lineHeight: 1.6 }}>{s.ai_assessment}</div>
+                    
+                      {/* SECURITY FINDINGS */}
+                      <div style={{ background: "rgba(15, 23, 42, 0.4)", borderRadius: 8, border: "1px solid var(--border-color)", overflow: "hidden" }}>
+                        <div style={{ padding: "10px 14px", background: "rgba(255, 255, 255, 0.03)", borderBottom: "1px solid var(--border-color)", fontWeight: 600, fontSize: 13, color: "var(--text-secondary)" }}>
+                          DETERMINISTIC SECURITY FINDINGS
                         </div>
-                      )}
-
-                      {s.findings?.length > 0 && (
-                        <div>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 8 }}>
-                            Findings ({s.findings.length})
-                          </div>
-                          {s.findings.map((f, i) => (
-                            <div key={i} style={{ marginBottom: 10, paddingLeft: 12, borderLeft: `2px solid ${SEV_COLORS[f.severity] || "#6b7280"}` }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                <span className={`severity-badge ${(f.severity || "INFO").toLowerCase()}`} style={{ fontSize: 10 }}>{f.severity}</span>
-                                <span style={{ fontWeight: 600, fontSize: 13 }}>{f.title}</span>
+                        <div style={{ padding: 14 }}>
+                          {s.findings?.length > 0 ? (
+                            s.findings.map((f, i) => (
+                              <div key={i} style={{ marginBottom: 12, paddingLeft: 12, borderLeft: `2px solid ${SEV_COLORS[f.severity] || "#6b7280"}` }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                                  <span className={`severity-badge ${(f.severity || "INFO").toLowerCase()}`} style={{ fontSize: 10 }}>{f.severity}</span>
+                                  <span style={{ fontWeight: 600, fontSize: 13 }}>{f.title}</span>
+                                </div>
+                                <div className="finding-desc" style={{ marginBottom: 6 }}>{f.description}</div>
+                                {f.evidence?.length > 0 && (
+                                  <div style={{ padding: 8, background: "rgba(0,0,0,0.2)", borderRadius: 4, border: "1px solid rgba(255,255,255,0.05)", marginBottom: 6 }}>
+                                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase" }}>Forensic Evidence</div>
+                                    <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, color: "#cbd5e1" }}>
+                                      {f.evidence.map((ev, idx) => <li key={idx}>{ev}</li>)}
+                                    </ul>
+                                  </div>
+                                )}
+                                {f.recommendation && <div style={{ fontSize: 12, color: "#34d399" }}>💡 {f.recommendation}</div>}
                               </div>
-                              <div className="finding-desc" style={{ marginTop: 4 }}>{f.description}</div>
-                              {f.evidence?.length > 0 && (
-                                <div style={{ marginTop: 8, padding: 8, background: "rgba(0,0,0,0.2)", borderRadius: 4, border: "1px solid rgba(255,255,255,0.05)" }}>
-                                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase" }}>Forensic Evidence</div>
-                                  <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, color: "#cbd5e1" }}>
-                                    {f.evidence.map((ev, idx) => (
-                                      <li key={idx} style={{ marginBottom: 2 }}>{ev}</li>
+                            ))
+                          ) : (
+                            <div style={{ color: "#34d399", fontSize: 13 }}>✅ No vulnerabilities detected. All cryptographic parameters meet security policy requirements.</div>
+                          )}
+                        </div>
+                      </div>
+                    
+                      {/* ML ANOMALY ANALYSIS */}
+                      <div style={{ background: "rgba(15, 23, 42, 0.4)", borderRadius: 8, border: "1px solid var(--border-color)", overflow: "hidden" }}>
+                        <div style={{ padding: "10px 14px", background: "rgba(255, 255, 255, 0.03)", borderBottom: "1px solid var(--border-color)", fontWeight: 600, fontSize: 13, color: "var(--text-secondary)" }}>
+                          ML ANOMALY ANALYSIS
+                        </div>
+                        <div style={{ padding: 14 }}>
+                          {s.is_anomalous ? (
+                            <div>
+                              <div style={{ display: "flex", gap: 16, marginBottom: 8 }}>
+                                <div>
+                                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Anomaly Score</div>
+                                  <div className="mono" style={{ fontSize: 16, color: "#f87171", fontWeight: 700 }}>{s.anomaly_score?.toFixed(2) || "N/A"}</div>
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Classification</div>
+                                  <div className="mono" style={{ fontSize: 14, color: "#f87171" }}>ANOMALOUS</div>
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2 }}>Model</div>
+                                  <div className="mono" style={{ fontSize: 13, color: "#e2e8f0" }}>Isolation Forest</div>
+                                </div>
+                              </div>
+                              <div style={{ fontSize: 12, color: "var(--text-muted)" }}>This score represents statistical deviation from the observed traffic baseline. It is not itself proof of a vulnerability.</div>
+                            </div>
+                          ) : (
+                            <div style={{ color: "var(--text-muted)", fontSize: 13 }}>Model: Isolation Forest — Not anomalous. Consistent with baseline traffic.</div>
+                          )}
+                        </div>
+                      </div>
+                    
+                      {/* AI SECURITY ANALYSIS */}
+                      {s.ai_assessment_structured ? (
+                        <div style={{ background: "rgba(59, 130, 246, 0.08)", borderRadius: 8, border: "1px solid rgba(59, 130, 246, 0.2)", overflow: "hidden" }}>
+                          <div style={{ padding: "10px 14px", background: "rgba(59, 130, 246, 0.15)", borderBottom: "1px solid rgba(59, 130, 246, 0.2)", fontWeight: 600, fontSize: 13, color: "#60a5fa", display: "flex", gap: 8, alignItems: "center" }}>
+                            <span>🤖</span> AI SECURITY ANALYSIS
+                            <span style={{ fontSize: 11, fontWeight: 400, color: "rgba(255,255,255,0.5)", marginLeft: "auto" }}>LLM-assisted interpretation of observed forensic evidence</span>
+                          </div>
+                          <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+                            
+                            {/* Executive Interpretation */}
+                            <div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 4 }}>Executive Interpretation</div>
+                              <div style={{ fontSize: 13, color: "#e2e8f0", lineHeight: 1.5 }}>
+                                <span style={{ display: "inline-block", padding: "2px 6px", background: "rgba(255,255,255,0.1)", borderRadius: 4, fontSize: 10, marginRight: 8, verticalAlign: "middle" }}>INFERRED</span>
+                                {s.ai_assessment_structured.executive_interpretation}
+                              </div>
+                            </div>
+                    
+                            {/* Evidence Correlation */}
+                            {s.ai_assessment_structured.evidence_correlation?.length > 0 && (
+                              <div>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 6 }}>Evidence Correlation</div>
+                                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, border: "1px solid rgba(255,255,255,0.1)" }}>
+                                  <thead>
+                                    <tr style={{ background: "rgba(255,255,255,0.05)", textAlign: "left" }}>
+                                      <th style={{ padding: "6px 8px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>Evidence</th>
+                                      <th style={{ padding: "6px 8px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>Observation</th>
+                                      <th style={{ padding: "6px 8px", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>Security Implication</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {s.ai_assessment_structured.evidence_correlation.map((ec, idx) => (
+                                      <tr key={idx} style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                                        <td style={{ padding: "6px 8px", color: "#94a3b8" }}>{ec.evidence_name}</td>
+                                        <td style={{ padding: "6px 8px", color: "#e2e8f0", fontWeight: 500 }}>
+                                          <span style={{ display: "inline-block", padding: "1px 4px", background: "rgba(52, 211, 153, 0.1)", color: "#34d399", borderRadius: 3, fontSize: 9, marginRight: 6 }}>OBSERVED</span>
+                                          {ec.observation}
+                                        </td>
+                                        <td style={{ padding: "6px 8px", color: "#fb923c" }}>{ec.security_implication}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                    
+                            {/* Reasoning */}
+                            <div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 4 }}>AI Reasoning</div>
+                              <div style={{ fontSize: 13, color: "#cbd5e1", lineHeight: 1.5 }}>
+                                <span style={{ display: "inline-block", padding: "2px 6px", background: "rgba(255,255,255,0.1)", borderRadius: 4, fontSize: 10, marginRight: 8, verticalAlign: "middle" }}>INFERRED</span>
+                                {s.ai_assessment_structured.ai_reasoning}
+                              </div>
+                            </div>
+                    
+                            {/* Priority & Recommendations */}
+                            <div style={{ display: "flex", gap: 24, marginTop: 4 }}>
+                              <div>
+                                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 4 }}>Priority</div>
+                                <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: SEV_COLORS[s.ai_assessment_structured.priority] || "#e2e8f0" }}>
+                                  {s.ai_assessment_structured.priority}
+                                </div>
+                              </div>
+                              {s.ai_assessment_structured.recommended_actions?.length > 0 && (
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 4 }}>Recommended Actions</div>
+                                  <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, color: "#34d399" }}>
+                                    {s.ai_assessment_structured.recommended_actions.map((act, idx) => (
+                                      <li key={idx} style={{ marginBottom: 2 }}>
+                                        <span style={{ display: "inline-block", padding: "1px 4px", background: "rgba(56, 189, 248, 0.1)", color: "#38bdf8", borderRadius: 3, fontSize: 9, marginRight: 6 }}>RECOMMENDED</span>
+                                        {act}
+                                      </li>
                                     ))}
                                   </ul>
                                 </div>
                               )}
-                              {f.recommendation && (
-                                <div style={{ marginTop: 6, fontSize: 12, color: "#34d399" }}>
-                                  💡 {f.recommendation}
-                                </div>
-                              )}
                             </div>
-                          ))}
-                        </div>
-                      )}
-                      
-                      {(!s.findings || s.findings.length === 0) && (
-                        <div style={{ marginTop: 12, padding: "10px 14px", background: "rgba(16, 185, 129, 0.08)", borderRadius: 8, border: "1px solid rgba(16, 185, 129, 0.2)", fontSize: 13, color: "#34d399" }}>
-                          ✅ No vulnerabilities detected in this session. All cryptographic parameters meet security policy requirements.
-                        </div>
-                      )}
-                      
-                      {s.protocol_events?.length > 0 && (
-                        <div style={{ marginTop: 16 }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                            <Terminal size={14} /> Protocol Timeline
+                            
+                            {/* Evidence Completeness */}
+                            <div style={{ marginTop: 8, paddingTop: 12, borderTop: "1px dashed rgba(255,255,255,0.1)" }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 4 }}>Evidence Completeness</div>
+                              <div style={{ fontSize: 12, color: s.stream_complete ? "#34d399" : "#fb923c" }}>
+                                {s.stream_complete ? "HIGH — Full capture available. Observations are reliable." : "PARTIAL — Reassembly gaps detected. Some conclusions may be limited."}
+                              </div>
+                            </div>
                           </div>
-                          <div style={{ background: "#0f172a", borderRadius: 8, padding: 12, border: "1px solid var(--border-color)", maxHeight: 300, overflowY: "auto" }}>
+                        </div>
+                      ) : s.ai_assessment ? (
+                        <div style={{ background: "rgba(59, 130, 246, 0.08)", borderRadius: 8, border: "1px solid rgba(59, 130, 246, 0.2)", padding: 14 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#60a5fa", marginBottom: 6, textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6 }}>
+                            <span>🤖</span> AI Security Assessment
+                          </div>
+                          <div style={{ fontSize: 13, color: "#cbd5e1", lineHeight: 1.6 }}>{s.ai_assessment}</div>
+                        </div>
+                      ) : null}
+                    
+                      {/* PROTOCOL TIMELINE */}
+                      {s.protocol_events?.length > 0 && (
+                        <div style={{ background: "rgba(15, 23, 42, 0.4)", borderRadius: 8, border: "1px solid var(--border-color)", overflow: "hidden" }}>
+                          <div style={{ padding: "10px 14px", background: "rgba(255, 255, 255, 0.03)", borderBottom: "1px solid var(--border-color)", fontWeight: 600, fontSize: 13, color: "var(--text-secondary)", display: "flex", gap: 8, alignItems: "center" }}>
+                            <Terminal size={14} /> RAW PROTOCOL TIMELINE
+                          </div>
+                          <div style={{ background: "#0f172a", padding: 12, maxHeight: 300, overflowY: "auto" }}>
                             {s.protocol_events.map((ev, i) => (
                               <div key={i} style={{ display: "flex", gap: 12, marginBottom: 8, fontSize: 12, fontFamily: "monospace" }}>
                                 <div style={{ color: "var(--text-muted)", width: 85, flexShrink: 0 }}>
@@ -645,6 +678,21 @@ export default function AnalysisDetailPage() {
                           </div>
                         </div>
                       )}
+                    
+                      {/* RAW DATA BUTTON */}
+                      <div style={{ textAlign: "right" }}>
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const jsonStr = JSON.stringify(s, null, 2);
+                            const win = window.open("", "_blank");
+                            win.document.write(`<pre style="background:#0f172a;color:#e2e8f0;padding:20px;font-size:12px;">${jsonStr}</pre>`);
+                          }}
+                          style={{ background: "transparent", border: "1px solid var(--border-color)", color: "var(--text-muted)", fontSize: 11, padding: "4px 8px", borderRadius: 4, cursor: "pointer" }}>
+                          VIEW RAW JSON
+                        </button>
+                      </div>
+                    
                     </div>
                   )}
                 </div>
@@ -714,7 +762,7 @@ export default function AnalysisDetailPage() {
               </div>
             </div>
           )}
-          {activeTab === "remediation" && data.status === "COMPLETED" && sessions.filter((s) => s.remediations?.length).length === 0 && (
+          {activeTab === "remediation" && data.status === "COMPLETED" && sessions.filter((s) => s.ai_assessment_structured?.recommended_actions?.length || s.remediations?.length).length === 0 && (
             <div className="card">
               <div style={{ padding: 40, textAlign: "center" }}>
                 <div style={{ fontSize: 48, marginBottom: 16 }}>🛡️</div>
@@ -725,9 +773,9 @@ export default function AnalysisDetailPage() {
               </div>
             </div>
           )}
-          {activeTab === "remediation" && data.status === "COMPLETED" && sessions.filter((s) => s.remediations?.length).length > 0 && (
+          {activeTab === "remediation" && data.status === "COMPLETED" && sessions.filter((s) => s.ai_assessment_structured?.recommended_actions?.length || s.remediations?.length).length > 0 && (
             <div className="card">
-              {sessions.filter((s) => s.remediations?.length).map((s) => (
+              {sessions.filter((s) => s.ai_assessment_structured?.recommended_actions?.length || s.remediations?.length).map((s) => (
                 <div key={s.session_id} style={{ marginBottom: 32 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid var(--border-color)" }}>
                     <span className={`severity-badge ${(s.severity || "INFO").toLowerCase()}`}>{s.severity || "INFO"}</span>
@@ -735,7 +783,34 @@ export default function AnalysisDetailPage() {
                       {s.protocol} — {s.src_ip} → {s.dst_ip}
                     </h4>
                   </div>
-                  {s.remediations.map((r, i) => (
+                  
+                  {/* AI Structured Recommendations */}
+                  {s.ai_assessment_structured?.recommended_actions?.length > 0 && (
+                    <div className="finding-item" style={{ marginBottom: 16 }}>
+                      <div className="finding-header">
+                        <span style={{ fontSize: 18 }}>🤖</span>
+                        <span style={{ fontWeight: 600, fontSize: 14, color: "#60a5fa" }}>AI Recommended Actions</span>
+                        <span className="severity-badge" style={{ marginLeft: "auto", background: "rgba(59, 130, 246, 0.12)", color: "#60a5fa" }}>
+                          {s.ai_assessment_structured.priority || "RECOMMENDED"}
+                        </span>
+                      </div>
+                      <div className="finding-desc" style={{ marginBottom: 12, paddingBottom: 12, borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 6 }}>AI Reasoning</div>
+                        <div style={{ color: "#cbd5e1" }}>{s.ai_assessment_structured.ai_reasoning}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 6 }}>Actions</div>
+                        <ul style={{ margin: 0, paddingLeft: 16, fontSize: 13, color: "#34d399" }}>
+                          {s.ai_assessment_structured.recommended_actions.map((act, idx) => (
+                            <li key={idx} style={{ marginBottom: 6 }}>{act}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Legacy Remediations */}
+                  {s.remediations?.map((r, i) => (
                     <div key={i} className="finding-item" style={{ marginBottom: 16 }}>
                       <div className="finding-header">
                         <Wrench size={14} color="var(--accent-cyan)" />

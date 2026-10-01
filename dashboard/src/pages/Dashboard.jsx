@@ -23,25 +23,7 @@ import {
 } from "lucide-react";
 import { fetchDashboardSummary } from "../lib/api";
 
-// Demo data for when backend isn't running
-const DEMO_DATA = {
-  total_analyses: 5,
-  total_sessions: 47,
-  average_score: 6.3,
-  overall_severity: "HIGH",
-  severity_breakdown: { CRITICAL: 8, HIGH: 12, MEDIUM: 15, LOW: 7, INFO: 5 },
-  tls_version_breakdown: { "TLS 1.3": 10, "TLS 1.2": 22, "TLS 1.1": 8, "TLS 1.0": 5, SSLv3: 2 },
-  protocol_breakdown: { SMTP: 18, SMTPS: 12, IMAP: 8, IMAPS: 5, POP3: 2, POP3S: 2 },
-  total_anomalies: 4,
-  forward_secrecy_pct: 62.5,
-  recent_analyses: [
-    { id: "demo-1", pcap_filename: "corporate_email.pcap", status: "completed", overall_score: 7.2, overall_severity: "HIGH", total_sessions: 15, total_packets: 4230, anomaly_count: 2, created_at: new Date().toISOString() },
-    { id: "demo-2", pcap_filename: "branch_office.pcap", status: "completed", overall_score: 4.5, overall_severity: "MEDIUM", total_sessions: 12, total_packets: 2810, anomaly_count: 1, created_at: new Date(Date.now() - 3600000).toISOString() },
-    { id: "demo-3", pcap_filename: "legacy_server.pcap", status: "completed", overall_score: 9.1, overall_severity: "CRITICAL", total_sessions: 8, total_packets: 1560, anomaly_count: 1, created_at: new Date(Date.now() - 7200000).toISOString() },
-    { id: "demo-4", pcap_filename: "updated_infra.pcap", status: "processing", overall_score: 0, overall_severity: "INFO", total_sessions: 0, total_packets: 0, anomaly_count: 0, created_at: new Date(Date.now() - 10800000).toISOString() },
-    { id: "demo-5", pcap_filename: "cloud_relay.pcap", status: "completed", overall_score: 2.1, overall_severity: "LOW", total_sessions: 12, total_packets: 3100, anomaly_count: 0, created_at: new Date(Date.now() - 14400000).toISOString() },
-  ],
-};
+
 
 const SEVERITY_COLORS = {
   CRITICAL: "#ef4444",
@@ -68,19 +50,48 @@ function scoreColor(score) {
 }
 
 export default function DashboardPage() {
-  const [data, setData] = useState(DEMO_DATA);
-  const [isLive, setIsLive] = useState(false);
+  const [data, setData] = useState(null);
+  const [isLive, setIsLive] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     fetchDashboardSummary()
       .then((d) => {
         setData(d);
         setIsLive(true);
+        setError(false);
       })
       .catch(() => {
         setIsLive(false);
+        setError(true);
       });
   }, []);
+
+  if (error) {
+    return (
+      <div className="app-layout">
+        <Sidebar />
+        <main className="main-content" style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
+          <div style={{ textAlign: "center", color: "var(--text-muted)" }}>
+            <AlertTriangle size={48} style={{ color: "var(--accent-red)", marginBottom: 16 }} />
+            <h2>Backend Offline</h2>
+            <p>No live analysis data available.</p>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="app-layout">
+        <Sidebar />
+        <main className="main-content" style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
+          <div className="loading-shimmer" style={{ width: 300, height: 24 }} />
+        </main>
+      </div>
+    );
+  }
 
   const sevData = Object.entries(data.severity_breakdown || {}).map(([name, value]) => ({
     name,

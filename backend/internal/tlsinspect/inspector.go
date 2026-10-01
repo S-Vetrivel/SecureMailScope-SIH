@@ -42,6 +42,13 @@ type tsharkFlatPacketJSON struct {
 	Source struct {
 		Layers struct {
 			TCPStream             []string `json:"tcp.stream"`
+			IPSrc                 []string `json:"ip.src"`
+			IPDst                 []string `json:"ip.dst"`
+			IPv6Src               []string `json:"ipv6.src"`
+			IPv6Dst               []string `json:"ipv6.dst"`
+			TCPSrcPort            []string `json:"tcp.srcport"`
+			TCPDstPort            []string `json:"tcp.dstport"`
+			TLSRecordContentType  []string `json:"tls.record.content_type"`
 			TLSHandshakeType      []string `json:"tls.handshake.type"`
 			TLSRecordVersion      []string `json:"tls.record.version"`
 			TLSHandshakeVersion   []string `json:"tls.handshake.version"`
@@ -60,6 +67,10 @@ type tsharkFlatPacketJSON struct {
 // StreamTLSResult holds aggregated TLS info for a single TCP stream
 type StreamTLSResult struct {
 	StreamID   int
+	SrcIP      string
+	DstIP      string
+	SrcPort    string
+	DstPort    string
 	TLSVersion string
 	Cipher     string
 	ServerName     string
@@ -68,20 +79,31 @@ type StreamTLSResult struct {
 	SigAlg         string
 	Certificates   []string // Hex encoded DER
 	AlertCount     int
-	Complete       bool
+	TLSObserved    bool
+	ServerHelloSeen bool
+	CertificateSeen bool
+	HandshakeFailed bool
+	HandshakeCompleted bool
+	AppDataObserved bool
 }
 
 func (t *TSharkInspector) Inspect(pcapPath string) ([]models.TLSInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), t.Timeout)
 	defer cancel()
 
-	// Direct argument slice — no shell interpolation. No -2 flag (causes issues with many PCAPs).
-	// Filter to ServerHello (type 2) only to get the negotiated TLS version + cipher per stream.
+	// Filter to any TLS packets to get full handshake + application data state
 	args := []string{
 		"-r", pcapPath,
 		"-T", "json",
-		"-Y", "tls.handshake.type == 2",  // ServerHello packets only
+		"-Y", "tls",
 		"-e", "tcp.stream",
+		"-e", "ip.src",
+		"-e", "ip.dst",
+		"-e", "ipv6.src",
+		"-e", "ipv6.dst",
+		"-e", "tcp.srcport",
+		"-e", "tcp.dstport",
+		"-e", "tls.record.content_type",
 		"-e", "tls.handshake.type",
 		"-e", "tls.handshake.version",
 		"-e", "tls.record.version",
@@ -92,47 +114,16 @@ func (t *TSharkInspector) Inspect(pcapPath string) ([]models.TLSInfo, error) {
 		"-e", "tls.handshake.sig_hash_alg",
 		"-e", "tls.handshake.certificate",
 		"-e", "tls.handshake.extensions.supported_version", // TLS 1.3 real negotiated version
-	}
-
-	cmd := exec.CommandContext(ctx, t.TSharkPath, args...)
-	output, err := cmd.Output()
-	if err != nil {
-		// Try a broader filter as fallback
-		return t.inspectBroad(pcapPath)
-	}
-
-	if len(output) == 0 || string(output) == "[]\n" {
-		return t.inspectBroad(pcapPath)
-	}
-
-	return t.parseOutput(output)
-}
-
-// inspectBroad falls back to capturing any TLS record packets when ServerHello filter returns nothing
-func (t *TSharkInspector) inspectBroad(pcapPath string) ([]models.TLSInfo, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), t.Timeout)
-	defer cancel()
-
-	args := []string{
-		"-r", pcapPath,
-		"-T", "json",
-		"-Y", "tls",
-		"-e", "tcp.stream",
-		"-e", "tls.handshake.type",
-		"-e", "tls.handshake.version",
-		"-e", "tls.record.version",
-		"-e", "tls.handshake.ciphersuite",
-		"-e", "tls.handshake.extensions_server_name",
-		"-e", "tls.handshake.extensions_alpn_str",
-		"-e", "tls.handshake.extensions_key_share_group",
-		"-e", "tls.handshake.sig_hash_alg",
-		"-e", "tls.handshake.certificate",
 		"-e", "tls.alert_message",
 	}
 
 	cmd := exec.CommandContext(ctx, t.TSharkPath, args...)
 	output, err := cmd.Output()
-	if err != nil || len(output) == 0 {
+	if err != nil {
+		return nil, err
+	}
+
+	if len(output) == 0 || string(output) == "[]\n" {
 		return nil, nil
 	}
 
@@ -162,6 +153,39 @@ func (t *TSharkInspector) parseOutput(output []byte) ([]models.TLSInfo, error) {
 			streamMap[streamID] = result
 		}
 
+		if len(layers.IPSrc) > 0 {
+			result.SrcIP = layers.IPSrc[0]
+		} else if len(layers.IPv6Src) > 0 {
+			result.SrcIP = layers.IPv6Src[0]
+		}
+		if len(layers.IPDst) > 0 {
+			result.DstIP = layers.IPDst[0]
+		} else if len(layers.IPv6Dst) > 0 {
+			result.DstIP = layers.IPv6Dst[0]
+		}
+		if len(layers.TCPSrcPort) > 0 {
+			result.SrcPort = layers.TCPSrcPort[0]
+		}
+		if len(layers.TCPDstPort) > 0 {
+			result.DstPort = layers.TCPDstPort[0]
+		}
+		result.TLSObserved = true
+
+		for _, ht := range layers.TLSHandshakeType {
+			if ht == "2" {
+				result.ServerHelloSeen = true
+			} else if ht == "11" {
+				result.CertificateSeen = true
+			} else if ht == "20" {
+				result.HandshakeCompleted = true
+			}
+		}
+
+		for _, ct := range layers.TLSRecordContentType {
+			if ct == "23" {
+				result.AppDataObserved = true
+			}
+		}
 		// TLS version: prefer supported_version extension (TLS 1.3) > handshake version > record version
 		if len(layers.TLSSupportedVersion) > 0 && result.TLSVersion == "" {
 			result.TLSVersion = normalizeTLSVersion(layers.TLSSupportedVersion[0])
@@ -206,13 +230,15 @@ func (t *TSharkInspector) parseOutput(output []byte) ([]models.TLSInfo, error) {
 		if len(layers.TLSAlertMessage) > 0 {
 			result.AlertCount++
 		}
-
-		result.Complete = true
 	}
 
 	// Convert map to slice, sorted by stream ID
 	var tlsList []models.TLSInfo
 	for _, r := range streamMap {
+		var srcPort, dstPort uint16
+		fmt.Sscanf(r.SrcPort, "%d", &srcPort)
+		fmt.Sscanf(r.DstPort, "%d", &dstPort)
+
 		tlsInfo := models.TLSInfo{
 			Version:            r.TLSVersion,
 			CipherSuite:        r.Cipher,
@@ -220,11 +246,18 @@ func (t *TSharkInspector) parseOutput(output []byte) ([]models.TLSInfo, error) {
 			ALPN:               r.ALPN,
 			KeyExchangeGroup:   r.KeyExchangeGrp,
 			SignatureAlgorithm: r.SigAlg,
-			HandshakeSucceeded: r.AlertCount == 0,
-			CertificateSeen:    r.Complete,
 			AlertCount:         r.AlertCount,
 			StreamID:           r.StreamID,
-			Complete:           r.Complete,
+			ClientIP:           r.SrcIP,
+			ClientPort:         srcPort,
+			ServerIP:           r.DstIP,
+			ServerPort:         dstPort,
+			TLSObserved:        r.TLSObserved,
+			ServerHelloSeen:    r.ServerHelloSeen,
+			CertificateSeen:    r.CertificateSeen,
+			HandshakeFailed:    r.AlertCount > 0 && !r.HandshakeCompleted && !r.AppDataObserved,
+			HandshakeCompleted: r.HandshakeCompleted,
+			AppDataObserved:    r.AppDataObserved,
 			RawCertificates:    r.Certificates,
 		}
 		if tlsInfo.Version != "" || tlsInfo.CipherSuite != "" {

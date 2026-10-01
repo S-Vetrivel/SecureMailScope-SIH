@@ -137,12 +137,13 @@ func (s *Service) ExecutePipeline(id string) error {
 	s.emitEvent(id, models.StatusAnalyzingTLS, 70, "Inspecting TLS handshakes via TShark")
 	_ = s.repo.UpdateAnalysisStatus(id, models.StatusAnalyzingTLS, "")
 
-	// Map from tcp stream index → TLSInfo
-	tlsByStream := make(map[int]models.TLSInfo)
+	// Map from tcp stream connection key → TLSInfo
+	tlsByKey := make(map[session.ConnectionKey]models.TLSInfo)
 	if s.tsharkInspector.Available() {
 		tsharkTLS, _ := s.tsharkInspector.Inspect(analysis.PCAPPath)
 		for _, t := range tsharkTLS {
-			tlsByStream[t.StreamID] = t
+			key := session.MakeConnectionKey(t.ClientIP, t.ClientPort, t.ServerIP, t.ServerPort)
+			tlsByKey[key] = t
 		}
 	}
 
@@ -178,12 +179,17 @@ func (s *Service) ExecutePipeline(id string) error {
 			ProtocolEvents: events,
 		}
 
-		// Match TShark TLS data to this stream (try stream index, then stream ID 0 for single-stream PCAPs)
+		// Match TShark TLS data to this stream using ConnectionKey
 		var tlsInfo *models.TLSInfo
-		if t, ok := tlsByStream[idx]; ok {
+		if t, ok := tlsByKey[stream.Key]; ok {
 			tlsInfo = &t
-		} else if t, ok := tlsByStream[0]; ok && len(tlsByStream) == 1 {
-			tlsInfo = &t
+		} else if len(tlsByKey) == 1 {
+			// fallback if only 1 TLS stream in entire PCAP and somehow key mismatch
+			for _, t := range tlsByKey {
+				tCopy := t
+				tlsInfo = &tCopy
+				break
+			}
 		}
 
 		if tlsInfo != nil {
@@ -194,8 +200,7 @@ func (s *Service) ExecutePipeline(id string) error {
 			emailSession.TLS = &models.TLSInfo{
 				Version:            "",
 				CipherSuite:        "",
-				HandshakeSucceeded: true,
-				Complete:           false,
+				TLSObserved:        true,
 			}
 		}
 
@@ -295,6 +300,7 @@ func (s *Service) ExecutePipeline(id string) error {
                     AnomalyScore float64        `json:"anomaly_score"`
                     Findings    []models.Finding `json:"findings"`
                     AIAssessment string          `json:"ai_assessment"`
+                    AIAssessmentStructured *models.AIAssessmentResult `json:"ai_assessment_structured"`
                     Remediations []interface{}   `json:"remediations"`
                 } `json:"sessions"`
             }
@@ -312,6 +318,7 @@ func (s *Service) ExecutePipeline(id string) error {
                             parsedSessions[i].IsAnomalous = aiSess.IsAnomalous
                             parsedSessions[i].AnomalyScore = aiSess.AnomalyScore
                             parsedSessions[i].AIAssessment = aiSess.AIAssessment
+                            parsedSessions[i].AIAssessmentStructured = aiSess.AIAssessmentStructured
                             parsedSessions[i].Remediations = aiSess.Remediations
                             // Add AI findings
                             for _, f := range aiSess.Findings {

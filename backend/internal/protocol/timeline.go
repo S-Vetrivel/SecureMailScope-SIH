@@ -98,7 +98,34 @@ func (a *TimelineAnalyzer) Analyze(proto models.EmailProtocol, stream *session.R
 		upper := strings.ToUpper(line)
 		
 		if lastClientCmd != "" && len(events) > 0 {
-			events[len(events)-1].Response = line
+			lastEv := &events[len(events)-1]
+			lastEv.Response = line
+
+			// STARTTLS exact command correlation
+			if startTLS.State == models.StateCommandSent {
+				cmdUpper := strings.ToUpper(lastEv.Command)
+				isStartTLS := false
+				if proto == models.ProtocolSMTP && strings.HasPrefix(cmdUpper, "STARTTLS") {
+					isStartTLS = true
+				} else if proto == models.ProtocolIMAP && strings.Contains(cmdUpper, "STARTTLS") {
+					isStartTLS = true
+				} else if proto == models.ProtocolPOP3 && strings.HasPrefix(cmdUpper, "STLS") {
+					isStartTLS = true
+				}
+
+				if isStartTLS {
+					if (proto == models.ProtocolSMTP && strings.HasPrefix(upper, "220")) ||
+					   (proto == models.ProtocolIMAP && strings.Contains(upper, "OK")) ||
+					   (proto == models.ProtocolPOP3 && strings.HasPrefix(upper, "+OK")) {
+						startTLS.Accepted = true
+						startTLS.State = models.StateAccepted
+						startTLS.TLSStarted = true
+					} else {
+						startTLS.State = models.StateFailed
+					}
+				}
+			}
+
 			lastClientCmd = ""
 		} else {
 			// Server greeting or unsolicited response
@@ -125,19 +152,6 @@ func (a *TimelineAnalyzer) Analyze(proto models.EmailProtocol, stream *session.R
 		   (proto == models.ProtocolIMAP && strings.Contains(upper, "STARTTLS")) ||
 		   (proto == models.ProtocolPOP3 && strings.Contains(upper, "STLS")) {
 			startTLS.Supported = true
-		}
-
-		// STARTTLS accepted?
-		if startTLS.Requested && !startTLS.Accepted {
-			if (proto == models.ProtocolSMTP && strings.HasPrefix(upper, "220")) ||
-			   (proto == models.ProtocolIMAP && strings.Contains(upper, "OK")) ||
-			   (proto == models.ProtocolPOP3 && strings.HasPrefix(upper, "+OK")) {
-				startTLS.Accepted = true
-				startTLS.State = models.StateAccepted
-				startTLS.TLSStarted = true
-			} else {
-				startTLS.State = models.StateFailed
-			}
 		}
 	}
 

@@ -23,7 +23,7 @@ from remediation import generate_remediation
 from llm_integration import generate_llm_assessment, generate_global_assessment_stream
 
 
-def generate_session_assessment(row: dict, is_anomalous: bool, anomaly_score: float) -> dict:
+def generate_session_assessment(row: dict, orig_session: dict, is_anomalous: bool, anomaly_score: float) -> dict:
     """
     Generate a structured AI security assessment for a single session.
     Returns assessment with findings and AI justification text.
@@ -41,7 +41,7 @@ def generate_session_assessment(row: dict, is_anomalous: bool, anomaly_score: fl
     cert_weak_key = bool(row.get("cert_is_weak_key", 0))
     cert_weak_sig = bool(row.get("cert_is_weak_signature", 0))
 
-    findings = list(row.get("findings", []) or [])
+    findings = list(orig_session.get("findings", []) or [])
     assessment_parts = []
 
     # --- TLS Version Assessment ---
@@ -208,36 +208,42 @@ def generate_session_assessment(row: dict, is_anomalous: bool, anomaly_score: fl
 
     # Prepare evidence for Ollama LLM
     evidence = {
-        "protocol": protocol,
-        "tls_version": tls_version,
-        "cipher": cipher,
-        "forward_secrecy": has_fs,
-        "is_encrypted": is_encrypted,
-        "has_starttls": has_starttls,
-        "cert_key_bits": cert_key_bits,
-        "cert_sig_algo": cert_sig_algo,
-        "cert_is_expired": cert_expired,
-        "cert_is_weak_key": cert_weak_key,
-        "is_anomalous": is_anomalous,
-        "anomaly_score": anomaly_score,
-        "existing_findings": [f["title"] for f in findings],
-        "rule_engine_assessment": " ".join(assessment_parts)
+        "session_context": {
+            "protocol": protocol,
+            "is_encrypted": is_encrypted,
+            "has_starttls": has_starttls,
+            "stream_complete": orig_session.get("stream_complete"),
+            "reassembly_gap": orig_session.get("reassembly_gap"),
+        },
+        "tls_evidence": orig_session.get("tls", {}),
+        "starttls_evidence": orig_session.get("starttls", {}),
+        "certificate_evidence": orig_session.get("certificate", {}),
+        "protocol_timeline": orig_session.get("protocol_events", []),
+        "rule_findings": findings,
+        "ml_features": {
+            "is_anomalous": is_anomalous,
+            "anomaly_score": anomaly_score,
+            "anomaly_explanation": " ".join(assessment_parts)
+        }
     }
 
     # Ask the small AI agent for reasoning, correlation, and explanation
     llm_resp = generate_llm_assessment(evidence)
-    ai_assessment = llm_resp.get("ai_assessment", " ".join(assessment_parts) if assessment_parts else "Session assessed \u2014 no significant cryptographic anomalies detected.")
-    
-    # We could also use llm_resp.get("root_cause") and llm_resp.get("remediation") here
-    # and append them as a finding, or attach them to the assessment.
-    if llm_resp.get("root_cause") and llm_resp.get("root_cause") != "N/A":
-        ai_assessment += f"\n\nRoot Cause: {llm_resp.get('root_cause')}"
-    if llm_resp.get("remediation") and llm_resp.get("remediation") != "N/A":
-        ai_assessment += f"\nRemediation: {llm_resp.get('remediation')}"
+
+    # Fallback structure if LLM didn't return proper JSON
+    if "executive_interpretation" not in llm_resp:
+        fallback_text = llm_resp.get("ai_assessment", " ".join(assessment_parts) if assessment_parts else "Session assessed \u2014 no significant cryptographic anomalies detected.")
+        llm_resp = {
+            "executive_interpretation": "AI Engine unavailable or returned unstructured response.",
+            "evidence_correlation": [],
+            "ai_reasoning": fallback_text,
+            "priority": "UNKNOWN",
+            "recommended_actions": []
+        }
 
     return {
         "findings": findings,
-        "ai_assessment": ai_assessment,
+        "ai_assessment_structured": llm_resp,
     }
 
 
@@ -292,9 +298,17 @@ def main():
     session_assessments = []
     for _, row in df.iterrows():
         row_dict = row.to_dict()
+        session_id = row_dict.get("session_id", "")
+        
+        orig_session = {}
+        for s in sessions:
+            if s.get("id") == session_id or s.get("session_id") == session_id:
+                orig_session = s
+                break
+                
         is_anomalous = bool(row.get("is_anomalous", False))
         anomaly_score = float(row.get("anomaly_score", 0.0))
-        assessment = generate_session_assessment(row_dict, is_anomalous, anomaly_score)
+        assessment = generate_session_assessment(row_dict, orig_session, is_anomalous, anomaly_score)
         session_assessments.append(assessment)
     print(f"  → Generated assessments for {len(session_assessments)} sessions")
 
@@ -317,12 +331,24 @@ def main():
     all_evidence = []
     for i, (_, row) in enumerate(df.iterrows()):
         row_dict = row.to_dict()
+        session_id = row_dict.get("session_id", "")
+        orig_session = {}
+        for s in sessions:
+            if s.get("id") == session_id or s.get("session_id") == session_id:
+                orig_session = s
+                break
+                
         all_evidence.append({
-            "session_id": row_dict.get("session_id", ""),
+            "session_id": session_id,
             "protocol": row_dict.get("protocol", "Unknown"),
             "risk_score": float(row_dict.get("risk_score", 1.0)),
             "findings": [f["title"] for f in session_assessments[i]["findings"]],
-            "is_anomalous": bool(row_dict.get("is_anomalous", False))
+            "is_anomalous": bool(row_dict.get("is_anomalous", False)),
+            "anomaly_score": float(row_dict.get("anomaly_score", 0.0)),
+            "tls_version": row_dict.get("tls_version"),
+            "cipher": row_dict.get("negotiated_cipher"),
+            "starttls_state": orig_session.get("starttls", {}).get("state"),
+            "handshake_completed": orig_session.get("tls", {}).get("handshake_completed"),
         })
     
     global_ai_assessment = generate_global_assessment_stream(all_evidence)
@@ -365,8 +391,9 @@ def build_results(df, anomaly_explanations, all_remediations, session_assessment
             "has_forward_secrecy": bool(row.get("has_forward_secrecy", False)),
             "risk_score": float(row.get("risk_score", 1.0)),
             "severity": row.get("severity", "INFO"),
-            "findings": assessment["findings"],
-            "ai_assessment": assessment["ai_assessment"],
+            "findings": assessment.get("findings", []),
+            "ai_assessment": assessment.get("ai_assessment", ""),
+            "ai_assessment_structured": assessment.get("ai_assessment_structured", None),
             "anomaly_score": float(row.get("anomaly_score", 0.0)),
             "is_anomalous": bool(row.get("is_anomalous", False)),
             "remediations": remediation_map.get(session_id, []),

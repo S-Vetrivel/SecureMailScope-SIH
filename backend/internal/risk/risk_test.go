@@ -15,7 +15,8 @@ func TestRiskEngineWeakTLS(t *testing.T) {
 		TLS: &models.TLSInfo{
 			Version:            "TLS 1.0",
 			CipherSuite:        "TLS_RSA_WITH_AES_128_GCM_SHA256",
-			HandshakeSucceeded: true,
+			HandshakeCompleted: true,
+			TLSObserved:        true,
 		},
 		ForwardSecrecy: models.FSNo,
 	}
