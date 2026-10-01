@@ -1,8 +1,12 @@
 package analysis
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"math"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -30,6 +34,7 @@ type Service struct {
 	tsharkInspector  *tlsinspect.TSharkInspector
 	riskEngine       *risk.Engine
 	eventSubscribers []func(ProgressEvent)
+	rawSubscribers   []func(string)
 }
 
 func NewService(repo *storage.Repository, tsharkPath string) *Service {
@@ -53,6 +58,16 @@ func (s *Service) emitEvent(analysisID string, stage models.AnalysisStatus, prog
 	}
 	for _, sub := range s.eventSubscribers {
 		sub(evt)
+	}
+}
+
+func (s *Service) SubscribeRawEvents(fn func(string)) {
+	s.rawSubscribers = append(s.rawSubscribers, fn)
+}
+
+func (s *Service) broadcastRawWSEvent(msg string) {
+	for _, sub := range s.rawSubscribers {
+		sub(msg)
 	}
 }
 
@@ -115,7 +130,7 @@ func (s *Service) ExecutePipeline(id string) error {
 	_ = s.repo.UpdateAnalysisStatus(id, models.StatusDetectingProtocols, "")
 
 	detector := protocol.NewDetector()
-	starttlsAnalyzer := protocol.NewStartTLSAnalyzer()
+	timelineAnalyzer := protocol.NewTimelineAnalyzer()
 	certParser := certificate.NewParser()
 
 	// Step 4: Extract TLS using TShark (whole-file pass)
@@ -138,11 +153,12 @@ func (s *Service) ExecutePipeline(id string) error {
 	var totalRiskScore float64
 	fsCount := 0
 	severityBreakdown := make(map[string]int)
+    var parsedSessions []models.EmailSession
 
 	for idx, stream := range streams {
 		sessionID := fmt.Sprintf("%s-S%03d", id, idx+1)
 		det := detector.Detect(stream.ClientPort, stream.ServerPort, stream.FullPayload)
-		starttlsInfo := starttlsAnalyzer.Analyze(det.Protocol, stream.ClientPayload, stream.ServerPayload)
+		events, starttlsInfo := timelineAnalyzer.Analyze(det.Protocol, stream)
 
 		emailSession := models.EmailSession{
 			ID:             sessionID,
@@ -159,6 +175,7 @@ func (s *Service) ExecutePipeline(id string) error {
 			ReassemblyGap:  stream.ReassemblyGap,
 			StartTLS:       starttlsInfo,
 			ForwardSecrecy: models.FSUnknown,
+			ProtocolEvents: events,
 		}
 
 		// Match TShark TLS data to this stream (try stream index, then stream ID 0 for single-stream PCAPs)
@@ -182,9 +199,15 @@ func (s *Service) ExecutePipeline(id string) error {
 			}
 		}
 
-		// Attempt certificate parsing from raw payload
-		if cert, err := certParser.ParseRawDER(stream.ServerPayload); err == nil {
-			emailSession.Certificate = cert
+		// Attempt certificate parsing from TShark raw output first, then raw payload
+		if tlsInfo != nil && len(tlsInfo.RawCertificates) > 0 {
+			if cert, err := certParser.ParseHexStrings(tlsInfo.RawCertificates); err == nil {
+				emailSession.Certificate = cert
+			}
+		} else {
+			if cert, err := certParser.ParseRawDER(stream.ServerPayload); err == nil {
+				emailSession.Certificate = cert
+			}
 		}
 
 		// Evaluate Risk Engine Findings
@@ -203,9 +226,132 @@ func (s *Service) ExecutePipeline(id string) error {
 			severityBreakdown[string(f.Severity)]++
 		}
 
-		// Persist session
-		_ = s.repo.SaveSession(&emailSession)
+		// Don't persist session just yet, wait for AI Engine results
+		// _ = s.repo.SaveSession(&emailSession)
+        
+        // Save to slice for AI engine
+        parsedSessions = append(parsedSessions, emailSession)
 	}
+
+    // Step 5.5: Run Python AI Engine
+    s.emitEvent(id, models.StatusAssessingRisk, 90, "Running AI Anomaly Detection (Isolation Forest)")
+    
+    // Dump sessions to JSON
+    analysisOutput := models.AnalysisOutput{
+        AnalysisID: id,
+        PcapFile: analysis.PCAPPath,
+        ParsedAt: time.Now(),
+        TotalPackets: totalPackets,
+        TotalStreams: len(streams),
+        Sessions: parsedSessions,
+    }
+    
+    sessionsPath := filepath.Join(filepath.Dir(analysis.PCAPPath), id+"_sessions.json")
+    resultsPath := filepath.Join(filepath.Dir(analysis.PCAPPath), id+"_results.json")
+    
+    sessionsBytes, _ := json.Marshal(analysisOutput)
+    _ = os.WriteFile(sessionsPath, sessionsBytes, 0644)
+    
+    // Run AI Engine
+    cwd, _ := os.Getwd()
+    aiEngineDir := filepath.Join(cwd, "..", "ai_engine")
+    if _, err := os.Stat(aiEngineDir); err != nil {
+        aiEngineDir = filepath.Join(cwd, "ai_engine") // depending on execution dir
+    }
+    pythonBin := filepath.Join(aiEngineDir, "venv", "bin", "python")
+    aiScript := filepath.Join(aiEngineDir, "main.py")
+    
+    cmd := exec.Command(pythonBin, aiScript, "--input", sessionsPath, "--output", resultsPath)
+    
+    // Capture stdout for streaming AI events
+    stdoutPipe, _ := cmd.StdoutPipe()
+    if err := cmd.Start(); err != nil {
+        s.emitEvent(id, models.StatusAssessingRisk, 95, fmt.Sprintf("AI Engine failed to start: %v", err))
+    } else {
+        // Read stdout line by line
+        scanner := bufio.NewScanner(stdoutPipe)
+        for scanner.Scan() {
+            line := scanner.Text()
+            if strings.HasPrefix(line, `{"event"`) {
+                // Forward it directly to websocket
+                s.broadcastRawWSEvent(line)
+            } else {
+                fmt.Println("[AI ENGINE]:", line)
+            }
+        }
+        
+        if err := cmd.Wait(); err != nil {
+            s.emitEvent(id, models.StatusAssessingRisk, 95, fmt.Sprintf("AI Engine failed, falling back to rule engine"))
+        } else {
+            // Parse results.json
+            resultsBytes, err := os.ReadFile(resultsPath)
+            if err == nil {
+            var aiResults struct {
+                GlobalAIAssessment string `json:"global_ai_assessment"`
+                Sessions []struct {
+                    SessionID   string          `json:"session_id"`
+                    GoSessionID string          `json:"go_session_id"`
+                    IsAnomalous bool            `json:"is_anomalous"`
+                    AnomalyScore float64        `json:"anomaly_score"`
+                    Findings    []models.Finding `json:"findings"`
+                    AIAssessment string          `json:"ai_assessment"`
+                    Remediations []interface{}   `json:"remediations"`
+                } `json:"sessions"`
+            }
+            if err := json.Unmarshal(resultsBytes, &aiResults); err == nil {
+                // Save Global AI Assessment
+                _ = s.repo.UpdateGlobalAIAssessment(id, aiResults.GlobalAIAssessment)
+
+                // Merge AI results into sessions by Go session ID
+                for i, sess := range parsedSessions {
+                    for _, aiSess := range aiResults.Sessions {
+                        // Match using the full Go session ID (go_session_id field)
+                        // or fall back to suffix matching
+                        goID := aiSess.GoSessionID
+                        if goID == sess.ID || strings.HasSuffix(sess.ID, aiSess.SessionID) {
+                            parsedSessions[i].IsAnomalous = aiSess.IsAnomalous
+                            parsedSessions[i].AnomalyScore = aiSess.AnomalyScore
+                            parsedSessions[i].AIAssessment = aiSess.AIAssessment
+                            parsedSessions[i].Remediations = aiSess.Remediations
+                            // Add AI findings
+                            for _, f := range aiSess.Findings {
+                                f.SessionID = sess.ID
+                                if f.ID == "" {
+                                    f.ID = "AI-" + uuid.New().String()[:8]
+                                }
+                                parsedSessions[i].Findings = append(parsedSessions[i].Findings, f)
+                                severityBreakdown[string(f.Severity)]++
+                            }
+                            break
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+    
+    // Recalculate max severity and save sessions
+    totalRiskScore = 0
+    severityBreakdown = make(map[string]int)
+    for i, sess := range parsedSessions {
+        maxScore := 0.0
+        maxSev := "INFO"
+        for _, f := range sess.Findings {
+            sc := severityToScore(f.Severity)
+            if sc > maxScore {
+                maxScore = sc
+                maxSev = string(f.Severity)
+            }
+            severityBreakdown[string(f.Severity)]++
+        }
+        parsedSessions[i].RiskScore = maxScore
+        parsedSessions[i].Severity = maxSev
+        totalRiskScore += maxScore
+        
+        _ = s.repo.SaveSession(&parsedSessions[i])
+    }
+
 
 	// Step 6: Update analysis aggregate stats
 	sessionCount := len(streams)

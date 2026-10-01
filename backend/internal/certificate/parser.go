@@ -3,9 +3,12 @@ package certificate
 import (
 	"crypto/ecdsa"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/securemailscope/backend/internal/models"
@@ -35,12 +38,30 @@ func (p *Parser) ParsePEM(pemBytes []byte) (*models.CertificateInfo, error) {
 	return p.ParseRawDER(block.Bytes)
 }
 
+func (p *Parser) ParseHexStrings(hexCerts []string) (*models.CertificateInfo, error) {
+	if len(hexCerts) == 0 {
+		return nil, fmt.Errorf("no certificates provided")
+	}
+
+	// Just parse the first one (leaf cert) for now
+	certHex := strings.ReplaceAll(hexCerts[0], ":", "")
+	derBytes, err := hex.DecodeString(certHex)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode hex cert: %w", err)
+	}
+	
+	return p.ParseRawDER(derBytes)
+}
+
 func (p *Parser) AnalyzeCertificate(cert *x509.Certificate) *models.CertificateInfo {
 	now := time.Now()
 	expired := now.After(cert.NotAfter)
 	notYetValid := now.Before(cert.NotBefore)
 
 	keyAlg, keyBits := extractPublicKeyDetails(cert.PublicKey)
+
+	hash := sha256.Sum256(cert.Raw)
+	fingerprint := hex.EncodeToString(hash[:])
 
 	info := &models.CertificateInfo{
 		Subject:            cert.Subject.String(),
@@ -56,6 +77,7 @@ func (p *Parser) AnalyzeCertificate(cert *x509.Certificate) *models.CertificateI
 		NotYetValid:        notYetValid,
 		ChainVerified:      nil, // Represent explicitly as UNKNOWN (null) unless full chain verified
 		HostnameVerified:   nil,
+		Fingerprint:        fingerprint,
 	}
 
 	return info

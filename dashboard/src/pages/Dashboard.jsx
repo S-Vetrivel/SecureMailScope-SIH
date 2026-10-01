@@ -118,14 +118,14 @@ export default function DashboardPage() {
               Cryptographic Security Posture Overview
             </p>
           </div>
-          <div className="header-actions">
+          {/* <div className="header-actions">
             <span
               className={`status-badge ${isLive ? "completed" : "pending"}`}
             >
               <span className="status-dot" />
-              {isLive ? "API Connected" : "Demo Mode"}
+             {isLive ? "API Connected" : "Offline"}
             </span>
-          </div>
+          </div> */}
         </header>
 
         <div className="page-content animate-in">

@@ -48,6 +48,10 @@ type tsharkFlatPacketJSON struct {
 			TLSSupportedVersion   []string `json:"tls.handshake.extensions.supported_version"` // TLS 1.3 real version
 			TLSCipherSuite        []string `json:"tls.handshake.ciphersuite"`
 			TLSServerName         []string `json:"tls.handshake.extensions_server_name"`
+			TLSALPN               []string `json:"tls.handshake.extensions_alpn_str"`
+			TLSKeyShareGroup      []string `json:"tls.handshake.extensions_key_share_group"`
+			TLSSigHashAlg         []string `json:"tls.handshake.sig_hash_alg"`
+			TLSCertificate        []string `json:"tls.handshake.certificate"`
 			TLSAlertMessage       []string `json:"tls.alert_message"`
 		} `json:"layers"`
 	} `json:"_source"`
@@ -58,9 +62,13 @@ type StreamTLSResult struct {
 	StreamID   int
 	TLSVersion string
 	Cipher     string
-	ServerName string
-	AlertCount int
-	Complete   bool
+	ServerName     string
+	ALPN           string
+	KeyExchangeGrp string
+	SigAlg         string
+	Certificates   []string // Hex encoded DER
+	AlertCount     int
+	Complete       bool
 }
 
 func (t *TSharkInspector) Inspect(pcapPath string) ([]models.TLSInfo, error) {
@@ -79,6 +87,10 @@ func (t *TSharkInspector) Inspect(pcapPath string) ([]models.TLSInfo, error) {
 		"-e", "tls.record.version",
 		"-e", "tls.handshake.ciphersuite",
 		"-e", "tls.handshake.extensions_server_name",
+		"-e", "tls.handshake.extensions_alpn_str",
+		"-e", "tls.handshake.extensions_key_share_group",
+		"-e", "tls.handshake.sig_hash_alg",
+		"-e", "tls.handshake.certificate",
 		"-e", "tls.handshake.extensions.supported_version", // TLS 1.3 real negotiated version
 	}
 
@@ -111,6 +123,10 @@ func (t *TSharkInspector) inspectBroad(pcapPath string) ([]models.TLSInfo, error
 		"-e", "tls.record.version",
 		"-e", "tls.handshake.ciphersuite",
 		"-e", "tls.handshake.extensions_server_name",
+		"-e", "tls.handshake.extensions_alpn_str",
+		"-e", "tls.handshake.extensions_key_share_group",
+		"-e", "tls.handshake.sig_hash_alg",
+		"-e", "tls.handshake.certificate",
 		"-e", "tls.alert_message",
 	}
 
@@ -169,6 +185,22 @@ func (t *TSharkInspector) parseOutput(output []byte) ([]models.TLSInfo, error) {
 		if len(layers.TLSServerName) > 0 && result.ServerName == "" {
 			result.ServerName = layers.TLSServerName[0]
 		}
+		
+		if len(layers.TLSALPN) > 0 && result.ALPN == "" {
+			result.ALPN = layers.TLSALPN[0]
+		}
+		
+		if len(layers.TLSKeyShareGroup) > 0 && result.KeyExchangeGrp == "" {
+			result.KeyExchangeGrp = layers.TLSKeyShareGroup[0]
+		}
+		
+		if len(layers.TLSSigHashAlg) > 0 && result.SigAlg == "" {
+			result.SigAlg = layers.TLSSigHashAlg[0]
+		}
+		
+		if len(layers.TLSCertificate) > 0 {
+			result.Certificates = append(result.Certificates, layers.TLSCertificate...)
+		}
 
 		// Alerts
 		if len(layers.TLSAlertMessage) > 0 {
@@ -185,11 +217,15 @@ func (t *TSharkInspector) parseOutput(output []byte) ([]models.TLSInfo, error) {
 			Version:            r.TLSVersion,
 			CipherSuite:        r.Cipher,
 			ServerName:         r.ServerName,
+			ALPN:               r.ALPN,
+			KeyExchangeGroup:   r.KeyExchangeGrp,
+			SignatureAlgorithm: r.SigAlg,
 			HandshakeSucceeded: r.AlertCount == 0,
 			CertificateSeen:    r.Complete,
 			AlertCount:         r.AlertCount,
 			StreamID:           r.StreamID,
 			Complete:           r.Complete,
+			RawCertificates:    r.Certificates,
 		}
 		if tlsInfo.Version != "" || tlsInfo.CipherSuite != "" {
 			tlsList = append(tlsList, tlsInfo)

@@ -61,27 +61,60 @@ type Analysis struct {
 	AnomalyCount      int               `json:"anomaly_count"`
 	SeverityBreakdown map[string]int    `json:"severity_breakdown"`
 	Error             string            `json:"error,omitempty"`
+	GlobalAIAssessment string           `json:"global_ai_assessment,omitempty"`
 }
 
+type AnalysisOutput struct {
+	AnalysisID   string         `json:"analysis_id"`
+	PcapFile     string         `json:"pcap_file"`
+	ParsedAt     time.Time      `json:"parsed_at"`
+	TotalPackets int            `json:"total_packets"`
+	TotalStreams int            `json:"total_streams"`
+	Sessions     []EmailSession `json:"sessions"`
+}
+
+type StartTLSState string
+
+const (
+	StatePlaintext       StartTLSState = "PLAINTEXT"
+	StateCommandSent     StartTLSState = "TLS_COMMAND_SENT"
+	StateAccepted        StartTLSState = "TLS_ACCEPTED"
+	StateFailed          StartTLSState = "FAILED"
+	StateTLSHandshake    StartTLSState = "TLS_HANDSHAKE"
+	StateEncrypted       StartTLSState = "ENCRYPTED"
+	StateStartTLSNotUsed StartTLSState = "STARTTLS_NOT_USED"
+)
+
 type StartTLSInfo struct {
-	Supported      bool   `json:"supported"`
-	Requested      bool   `json:"requested"`
-	Accepted       bool   `json:"accepted"`
-	TLSStarted     bool   `json:"tls_started"`
-	TLSEstablished bool   `json:"tls_established"`
-	ResponseCode   string `json:"response_code,omitempty"`
+	State          StartTLSState `json:"state"`
+	Supported      bool          `json:"supported"`
+	Requested      bool          `json:"requested"`
+	Accepted       bool          `json:"accepted"`
+	TLSStarted     bool          `json:"tls_started"`
+	TLSEstablished bool          `json:"tls_established"`
+	ResponseCode   string        `json:"response_code,omitempty"`
+}
+
+type ProtocolEvent struct {
+	Timestamp time.Time `json:"timestamp"`
+	Direction string    `json:"direction"`
+	Command   string    `json:"command"`
+	Response  string    `json:"response,omitempty"`
 }
 
 type TLSInfo struct {
-	Version            string `json:"version"`
-	CipherSuite        string `json:"cipher_suite"`
-	ServerName         string `json:"server_name,omitempty"`
-	SignatureAlgorithm string `json:"signature_algorithm,omitempty"`
-	HandshakeSucceeded bool   `json:"handshake_succeeded"`
-	CertificateSeen    bool   `json:"certificate_seen"`
-	AlertCount         int    `json:"alert_count"`
-	StreamID           int    `json:"stream_id"`
-	Complete           bool   `json:"complete"`
+	Version            string   `json:"version"`
+	CipherSuite        string   `json:"cipher_suite"`
+	ServerName         string   `json:"server_name,omitempty"`
+	ALPN               string   `json:"alpn,omitempty"`
+	KeyExchangeGroup   string   `json:"key_exchange_group,omitempty"`
+	SignatureAlgorithm string   `json:"signature_algorithm,omitempty"`
+	HandshakeSucceeded bool     `json:"handshake_succeeded"`
+	CertificateSeen    bool     `json:"certificate_seen"`
+	AlertCount         int      `json:"alert_count"`
+	StreamID           int      `json:"stream_id"`
+	Complete           bool     `json:"complete"`
+	RawCertificates    []string `json:"-"`
 }
 
 type CertificateInfo struct {
@@ -99,6 +132,7 @@ type CertificateInfo struct {
 	ChainVerified      *bool     `json:"chain_verified"`
 	HostnameVerified   *bool     `json:"hostname_verified"`
 	ParseError         string    `json:"parse_error,omitempty"`
+	Fingerprint        string    `json:"fingerprint,omitempty"`
 }
 
 type Finding struct {
@@ -136,6 +170,7 @@ type EmailSession struct {
 	Certificate    *CertificateInfo     `json:"certificate,omitempty"`
 	ForwardSecrecy ForwardSecrecyStatus `json:"forward_secrecy"`
 	Findings       []Finding            `json:"findings"`
+	ProtocolEvents []ProtocolEvent      `json:"protocol_events"`
 
 	// Dashboard-friendly flat aliases (computed at response time)
 	SessionID          string  `json:"session_id"`
@@ -150,6 +185,8 @@ type EmailSession struct {
 	IsAnomalous        bool    `json:"is_anomalous"`
 	AnomalyScore       float64 `json:"anomaly_score"`
 	Scores             SessionScores `json:"scores"`
+	Remediations       []interface{} `json:"remediations,omitempty"`
+	AIAssessment       string        `json:"ai_assessment,omitempty"`
 }
 
 // SessionScores drives the Security Radar chart

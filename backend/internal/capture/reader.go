@@ -22,8 +22,8 @@ type PacketMetadata struct {
 	TCPAck         uint32
 	TCPFlags       string
 	Payload        []byte
-	Layer3Layer    gopacket.Layer
-	Layer4Layer    gopacket.Layer
+	NetFlow        gopacket.Flow
+	TCP            *layers.TCP
 }
 
 type PCAPReader struct {
@@ -78,10 +78,12 @@ func (r *PCAPReader) ReadPackets(onPacket func(pkt PacketMetadata) error) (int, 
 			ip4, _ := ip4Layer.(*layers.IPv4)
 			meta.SrcIP = ip4.SrcIP.String()
 			meta.DstIP = ip4.DstIP.String()
+			meta.NetFlow = ip4.NetworkFlow()
 		} else if ip6Layer := packet.Layer(layers.LayerTypeIPv6); ip6Layer != nil {
 			ip6, _ := ip6Layer.(*layers.IPv6)
 			meta.SrcIP = ip6.SrcIP.String()
 			meta.DstIP = ip6.DstIP.String()
+			meta.NetFlow = ip6.NetworkFlow()
 		} else {
 			// Skip non-IP packets safely
 			continue
@@ -97,6 +99,7 @@ func (r *PCAPReader) ReadPackets(onPacket func(pkt PacketMetadata) error) (int, 
 			meta.TCPAck = tcp.Ack
 			meta.Payload = tcp.Payload
 			meta.TCPFlags = formatTCPFlags(tcp)
+			meta.TCP = tcp
 		} else {
 			// Ignore non-TCP safely
 			continue

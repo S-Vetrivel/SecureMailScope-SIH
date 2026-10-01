@@ -22,10 +22,12 @@ func NewRepository(dbPath string) (*Repository, error) {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open sqlite database: %w", err)
 	}
+
+	db.SetMaxOpenConns(1)
 
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("failed to ping sqlite database: %w", err)
@@ -42,6 +44,10 @@ func NewRepository(dbPath string) (*Repository, error) {
 
 func (r *Repository) Close() error {
 	return r.db.Close()
+}
+
+func (r *Repository) DB() *sql.DB {
+	return r.db
 }
 
 func (r *Repository) initSchema() error {
@@ -102,7 +108,14 @@ func (r *Repository) initSchema() error {
 	);
 	`
 	_, err := r.db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+	// Idempotent migrations for new columns
+	_, _ = r.db.Exec(`ALTER TABLE sessions ADD COLUMN ai_assessment TEXT DEFAULT ''`)
+	_, _ = r.db.Exec(`ALTER TABLE sessions ADD COLUMN remediations_json TEXT DEFAULT '[]'`)
+	_, _ = r.db.Exec(`ALTER TABLE analyses ADD COLUMN global_ai_assessment TEXT DEFAULT ''`)
+	return nil
 }
 
 func (r *Repository) CreateAnalysis(a *models.Analysis) error {
@@ -150,9 +163,15 @@ func (r *Repository) UpdateAnalysisAggregate(id string, status models.AnalysisSt
 	return err
 }
 
+func (r *Repository) UpdateGlobalAIAssessment(id string, assessment string) error {
+	query := `UPDATE analyses SET global_ai_assessment = ? WHERE id = ?`
+	_, err := r.db.Exec(query, assessment, id)
+	return err
+}
+
 
 func (r *Repository) GetAnalysis(id string) (*models.Analysis, error) {
-	query := `SELECT id, pcap_path, COALESCE(pcap_filename,''), status, started_at, finished_at, total_packets, total_sessions, COALESCE(overall_score,0), COALESCE(overall_severity,'INFO'), COALESCE(forward_secrecy_pct,0), COALESCE(severity_breakdown,'{}'), COALESCE(error,'') FROM analyses WHERE id = ?`
+	query := `SELECT id, pcap_path, COALESCE(pcap_filename,''), status, started_at, finished_at, total_packets, total_sessions, COALESCE(overall_score,0), COALESCE(overall_severity,'INFO'), COALESCE(forward_secrecy_pct,0), COALESCE(severity_breakdown,'{}'), COALESCE(error,''), COALESCE(global_ai_assessment,'') FROM analyses WHERE id = ?`
 	row := r.db.QueryRow(query, id)
 
 	var a models.Analysis
@@ -160,7 +179,7 @@ func (r *Repository) GetAnalysis(id string) (*models.Analysis, error) {
 	var sevBreakdownJSON string
 	err := row.Scan(&a.ID, &a.PCAPPath, &a.PCAPFilename, &a.Status, &a.StartedAt, &finishedAt,
 		&a.TotalPackets, &a.TotalSessions, &a.OverallScore, &a.OverallSeverity,
-		&a.ForwardSecrecyPct, &sevBreakdownJSON, &a.Error)
+		&a.ForwardSecrecyPct, &sevBreakdownJSON, &a.Error, &a.GlobalAIAssessment)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +192,7 @@ func (r *Repository) GetAnalysis(id string) (*models.Analysis, error) {
 }
 
 func (r *Repository) ListAnalyses() ([]models.Analysis, error) {
-	query := `SELECT id, pcap_path, COALESCE(pcap_filename,''), status, started_at, finished_at, total_packets, total_sessions, COALESCE(overall_score,0), COALESCE(overall_severity,'INFO'), COALESCE(forward_secrecy_pct,0), COALESCE(severity_breakdown,'{}'), COALESCE(error,'') FROM analyses ORDER BY started_at DESC`
+	query := `SELECT id, pcap_path, COALESCE(pcap_filename,''), status, started_at, finished_at, total_packets, total_sessions, COALESCE(overall_score,0), COALESCE(overall_severity,'INFO'), COALESCE(forward_secrecy_pct,0), COALESCE(severity_breakdown,'{}'), COALESCE(error,''), COALESCE(global_ai_assessment,'') FROM analyses ORDER BY started_at DESC`
 	rows, err := r.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -187,7 +206,7 @@ func (r *Repository) ListAnalyses() ([]models.Analysis, error) {
 		var sevBreakdownJSON string
 		if err := rows.Scan(&a.ID, &a.PCAPPath, &a.PCAPFilename, &a.Status, &a.StartedAt, &finishedAt,
 			&a.TotalPackets, &a.TotalSessions, &a.OverallScore, &a.OverallSeverity,
-			&a.ForwardSecrecyPct, &sevBreakdownJSON, &a.Error); err != nil {
+			&a.ForwardSecrecyPct, &sevBreakdownJSON, &a.Error, &a.GlobalAIAssessment); err != nil {
 			continue
 		}
 		if finishedAt.Valid {
@@ -226,16 +245,17 @@ func (r *Repository) SaveSession(s *models.EmailSession) error {
 		isAnomalousInt = 1
 	}
 	scoresJSON, _ := json.Marshal(s.Scores)
+	remediationsJSON, _ := json.Marshal(s.Remediations)
 
 	query := `INSERT OR REPLACE INTO sessions 
-	(id, analysis_id, client_ip, client_port, server_ip, server_port, protocol, start_time, end_time, packet_count, client_bytes, server_bytes, stream_complete, reassembly_gap, starttls_json, tls_json, certificate_json, forward_secrecy, anomaly_score, is_anomalous, scores_json)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	(id, analysis_id, client_ip, client_port, server_ip, server_port, protocol, start_time, end_time, packet_count, client_bytes, server_bytes, stream_complete, reassembly_gap, starttls_json, tls_json, certificate_json, forward_secrecy, anomaly_score, is_anomalous, scores_json, ai_assessment, remediations_json)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	_, err := r.db.Exec(query,
 		s.ID, s.AnalysisID, s.Client.IP, s.Client.Port, s.Server.IP, s.Server.Port,
 		string(s.Protocol), s.StartTime, s.EndTime, s.PacketCount, s.ClientBytes, s.ServerBytes,
 		streamComplete, reassemblyGap, string(startTLSJSON), string(tlsJSON), string(certJSON), string(s.ForwardSecrecy),
-		s.AnomalyScore, isAnomalousInt, string(scoresJSON),
+		s.AnomalyScore, isAnomalousInt, string(scoresJSON), s.AIAssessment, string(remediationsJSON),
 	)
 	if err != nil {
 		return err
@@ -259,7 +279,7 @@ func (r *Repository) SaveFinding(analysisID string, f *models.Finding) error {
 }
 
 func (r *Repository) GetSessionsForAnalysis(analysisID string) ([]models.EmailSession, error) {
-	query := `SELECT id, analysis_id, client_ip, client_port, server_ip, server_port, protocol, start_time, end_time, packet_count, client_bytes, server_bytes, stream_complete, reassembly_gap, starttls_json, tls_json, certificate_json, forward_secrecy, anomaly_score, is_anomalous, scores_json FROM sessions WHERE analysis_id = ?`
+	query := `SELECT id, analysis_id, client_ip, client_port, server_ip, server_port, protocol, start_time, end_time, packet_count, client_bytes, server_bytes, stream_complete, reassembly_gap, starttls_json, tls_json, certificate_json, forward_secrecy, anomaly_score, is_anomalous, scores_json, COALESCE(ai_assessment,'') as ai_assessment, COALESCE(remediations_json,'[]') as remediations_json FROM sessions WHERE analysis_id = ?`
 	rows, err := r.db.Query(query, analysisID)
 	if err != nil {
 		return nil, err
@@ -269,14 +289,14 @@ func (r *Repository) GetSessionsForAnalysis(analysisID string) ([]models.EmailSe
 	var sessions []models.EmailSession
 	for rows.Next() {
 		var s models.EmailSession
-		var protoStr, fwSecStr, starttlsStr, tlsStr, certStr, scoresStr string
+		var protoStr, fwSecStr, starttlsStr, tlsStr, certStr, scoresStr, aiAssessment, remediationsStr string
 		var streamCompleteInt, reassemblyGapInt, isAnomalousInt int
 
 		err := rows.Scan(
 			&s.ID, &s.AnalysisID, &s.Client.IP, &s.Client.Port, &s.Server.IP, &s.Server.Port,
 			&protoStr, &s.StartTime, &s.EndTime, &s.PacketCount, &s.ClientBytes, &s.ServerBytes,
 			&streamCompleteInt, &reassemblyGapInt, &starttlsStr, &tlsStr, &certStr, &fwSecStr,
-			&s.AnomalyScore, &isAnomalousInt, &scoresStr,
+			&s.AnomalyScore, &isAnomalousInt, &scoresStr, &aiAssessment, &remediationsStr,
 		)
 		if err != nil {
 			return nil, err
@@ -306,9 +326,10 @@ func (r *Repository) GetSessionsForAnalysis(analysisID string) ([]models.EmailSe
 		if scoresStr != "" {
 			_ = json.Unmarshal([]byte(scoresStr), &s.Scores)
 		}
-
-		findings, _ := r.GetFindingsForSession(s.ID)
-		s.Findings = findings
+		s.AIAssessment = aiAssessment
+		if remediationsStr != "" && remediationsStr != "[]" && remediationsStr != "null" {
+			_ = json.Unmarshal([]byte(remediationsStr), &s.Remediations)
+		}
 
 		// Populate dashboard-friendly flat fields
 		s.SessionID = s.ID
@@ -320,20 +341,27 @@ func (r *Repository) GetSessionsForAnalysis(analysisID string) ([]models.EmailSe
 			s.SignatureAlgorithm = s.TLS.SignatureAlgorithm
 		}
 		s.HasForwardSecrecy = s.ForwardSecrecy == models.ForwardSecrecyStatus("YES")
+		
+		sessions = append(sessions, s)
+	}
+	rows.Close() // Explicitly close rows before querying for findings to avoid MaxOpenConns(1) deadlock
+
+	for i := range sessions {
+		findings, _ := r.GetFindingsForSession(sessions[i].ID)
+		sessions[i].Findings = findings
+
 		// Risk score from findings
 		maxScore := 0.0
 		maxSev := "INFO"
-		for _, f := range s.Findings {
+		for _, f := range sessions[i].Findings {
 			sc := severityToScore(f.Severity)
 			if sc > maxScore {
 				maxScore = sc
 				maxSev = string(f.Severity)
 			}
 		}
-		s.RiskScore = maxScore
-		s.Severity = maxSev
-
-		sessions = append(sessions, s)
+		sessions[i].RiskScore = maxScore
+		sessions[i].Severity = maxSev
 	}
 	return sessions, nil
 }

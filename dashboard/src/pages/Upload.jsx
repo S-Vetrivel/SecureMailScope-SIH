@@ -43,7 +43,7 @@ export default function UploadPage() {
       } catch (err) {
         clearInterval(interval);
         setErrorMsg(
-          "Upload failed. Make sure the backend server is running on port 8080."
+          "Upload failed. Make sure the backend server is running on port 6000."
         );
         setState("error");
       }

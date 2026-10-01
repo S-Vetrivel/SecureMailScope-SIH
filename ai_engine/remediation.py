@@ -120,31 +120,21 @@ mail {
 
 REMEDIATION_MAP = {
     # TLS Version Issues
-    "VULN-TLS-001": {  # SSLv3
+    "TLS-001": {  # Deprecated TLS (combines SSLv3/TLS1.0/TLS1.1/None logic)
         "category": "Protocol Upgrade",
+        "priority": "URGENT",
+        "configs": {
+            "Postfix": POSTFIX_SECURE_CONFIG["tls_protocols"],
+            "Dovecot": DOVECOT_SECURE_CONFIG["tls_protocols"],
+            "Nginx": NGINX_MAIL_SECURE_CONFIG["tls_protocols"],
+        },
+    },
+    "PLAINTEXT-001": {  # No TLS
+        "category": "Enable Encryption",
         "priority": "IMMEDIATE",
         "configs": {
-            "Postfix": POSTFIX_SECURE_CONFIG["tls_protocols"],
-            "Dovecot": DOVECOT_SECURE_CONFIG["tls_protocols"],
-            "Nginx": NGINX_MAIL_SECURE_CONFIG["tls_protocols"],
-        },
-    },
-    "VULN-TLS-002": {  # TLS 1.0
-        "category": "Protocol Upgrade",
-        "priority": "URGENT",
-        "configs": {
-            "Postfix": POSTFIX_SECURE_CONFIG["tls_protocols"],
-            "Dovecot": DOVECOT_SECURE_CONFIG["tls_protocols"],
-            "Nginx": NGINX_MAIL_SECURE_CONFIG["tls_protocols"],
-        },
-    },
-    "VULN-TLS-003": {  # TLS 1.1
-        "category": "Protocol Upgrade",
-        "priority": "URGENT",
-        "configs": {
-            "Postfix": POSTFIX_SECURE_CONFIG["tls_protocols"],
-            "Dovecot": DOVECOT_SECURE_CONFIG["tls_protocols"],
-            "Nginx": NGINX_MAIL_SECURE_CONFIG["tls_protocols"],
+            "Postfix": POSTFIX_SECURE_CONFIG["tls_protocols"] + "\n\n" + POSTFIX_SECURE_CONFIG["certificate"],
+            "Dovecot": DOVECOT_SECURE_CONFIG["tls_protocols"] + "\n\n" + DOVECOT_SECURE_CONFIG["certificate"],
         },
     },
     "VULN-TLS-010": {  # No TLS
@@ -156,9 +146,18 @@ REMEDIATION_MAP = {
         },
     },
     # Cipher Issues
-    "VULN-CIPHER-001": {  # NULL cipher
+    "CIPHER-001": {  # Obsolete/Weak cipher
         "category": "Cipher Hardening",
         "priority": "IMMEDIATE",
+        "configs": {
+            "Postfix": POSTFIX_SECURE_CONFIG["tls_ciphers"],
+            "Dovecot": DOVECOT_SECURE_CONFIG["tls_ciphers"],
+            "Nginx": NGINX_MAIL_SECURE_CONFIG["tls_ciphers"],
+        },
+    },
+    "CIPHER-002": {  # Non-AEAD
+        "category": "Cipher Hardening",
+        "priority": "MEDIUM",
         "configs": {
             "Postfix": POSTFIX_SECURE_CONFIG["tls_ciphers"],
             "Dovecot": DOVECOT_SECURE_CONFIG["tls_ciphers"],
@@ -192,7 +191,7 @@ REMEDIATION_MAP = {
         },
     },
     # Forward Secrecy
-    "VULN-KEX-001": {
+    "FS-001": {
         "category": "Key Exchange Upgrade",
         "priority": "HIGH",
         "configs": {
@@ -209,7 +208,7 @@ REMEDIATION_MAP = {
         },
     },
     # Certificate Issues
-    "VULN-CERT-001": {  # Expired
+    "CERT-001": {  # Expired
         "category": "Certificate Renewal",
         "priority": "IMMEDIATE",
         "configs": {
@@ -224,6 +223,13 @@ sudo certbot certonly --standalone -d mail.yourdomain.com
 
 # Auto-renew (add to crontab)
 0 0 1 * * certbot renew --post-hook "systemctl reload postfix dovecot" """,
+        },
+    },
+    "CERT-002": {  # Not yet valid
+        "category": "Certificate Renewal",
+        "priority": "HIGH",
+        "configs": {
+            "NTP": "sudo apt install ntp && sudo systemctl enable ntp && sudo systemctl start ntp",
         },
     },
     "VULN-CERT-002": {  # Self-signed
@@ -242,7 +248,7 @@ sudo certbot certonly --standalone -d mail.yourdomain.com
 # ssl_key = </etc/letsencrypt/live/mail.yourdomain.com/privkey.pem""",
         },
     },
-    "VULN-CERT-003": {  # Weak key
+    "KEY-001": {  # Weak key
         "category": "Key Regeneration",
         "priority": "IMMEDIATE",
         "configs": {
@@ -256,7 +262,7 @@ openssl req -new -key mail_server.key -out mail_server.csr \\
     -subj "/C=IN/ST=State/L=City/O=Organization/CN=mail.yourdomain.com" """,
         },
     },
-    "VULN-CERT-004": {  # Weak signature
+    "SIG-001": {  # Weak signature
         "category": "Certificate Reissuance",
         "priority": "URGENT",
         "configs": {
@@ -317,7 +323,9 @@ def generate_remediation(findings: list[dict]) -> list[dict]:
 
     for finding in findings:
         vuln_id = finding.get("id", "")
-        remap = REMEDIATION_MAP.get(vuln_id)
+        # Strip session ID suffix (e.g. TLS-001-session123 -> TLS-001)
+        base_vuln_id = "-".join(vuln_id.split("-")[:2])
+        remap = REMEDIATION_MAP.get(base_vuln_id)
 
         if not remap:
             # Generic remediation for unmapped vulnerabilities

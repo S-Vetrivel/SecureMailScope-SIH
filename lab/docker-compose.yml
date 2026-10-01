@@ -6,9 +6,9 @@ services:
       context: ../backend
       dockerfile: Dockerfile
     ports:
-      - "8080:8080"
+      - "6000:6000"
     environment:
-      - HTTP_PORT=8080
+      - HTTP_PORT=6000
       - DB_PATH=/app/data/securemailscope.db
       - UPLOAD_DIR=/app/data/uploads
       - FRONTEND_ORIGIN=http://localhost:5173

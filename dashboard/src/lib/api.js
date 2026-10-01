@@ -1,4 +1,4 @@
-export const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8080/api/v1";
+export const API_BASE = import.meta.env.VITE_API_URL || "/api/v1";
 
 export async function fetchHealth() {
   const res = await fetch(`${API_BASE}/health`);
@@ -7,7 +7,7 @@ export async function fetchHealth() {
 }
 
 export async function fetchDashboardSummary() {
-  const res = await fetch(`${API_BASE}/health`);
+  const res = await fetch(`${API_BASE}/summary`);
   if (!res.ok) throw new Error("Failed to fetch dashboard summary");
   return res.json();
 }
@@ -78,5 +78,5 @@ export async function uploadPCAP(file) {
 }
 
 export function getReportURL(analysisId, format = "json") {
-  return `${API_BASE}/analyses/${analysisId}/summary?format=${format}`;
+  return `${API_BASE}/analyses/${analysisId}/report?format=${format}`;
 }

@@ -168,6 +168,9 @@ def extract_session_features(session: dict[str, Any]) -> dict[str, Any]:
         "protocol": protocol,
         "src_ip": src_ip,
         "dst_ip": dst_ip,
+        "risk_score": float(session.get("risk_score", 1.0)),
+        "severity": session.get("severity", "INFO"),
+        "findings": session.get("findings", []),
     }
 
     # ---- TLS Handshake Features ----

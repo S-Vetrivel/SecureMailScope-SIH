@@ -63,6 +63,36 @@ func (e *Engine) Assess(session models.EmailSession) []models.Finding {
 		})
 	}
 
+	if session.StartTLS.State == models.StateStartTLSNotUsed && len(session.ProtocolEvents) > 0 {
+		// Found plaintext protocol interactions
+		hasAuth := false
+		for _, e := range session.ProtocolEvents {
+			cmd := strings.ToUpper(e.Command)
+			if strings.HasPrefix(cmd, "AUTH") || strings.HasPrefix(cmd, "LOGIN") || strings.HasPrefix(cmd, "PASS") {
+				hasAuth = true
+				break
+			}
+		}
+		
+		title := "Plaintext Session"
+		sev := models.SeverityHigh
+		if hasAuth {
+			title = "Plaintext Authentication Detected"
+			sev = models.SeverityCritical
+		}
+
+		findings = append(findings, models.Finding{
+			ID:          fmt.Sprintf("PLAINTEXT-001-%s", session.ID),
+			Title:       title,
+			Severity:    sev,
+			Category:    "PROTOCOL",
+			SessionID:   session.ID,
+			Description: "The session communicated in plaintext without upgrading to TLS.",
+			Evidence:    []string{"STARTTLS not negotiated successfully before commands"},
+			Recommendation: "Enforce TLS for all mail sessions, especially those sending authentication credentials.",
+		})
+	}
+
 	// TLS Handshake Rules
 	if session.TLS != nil {
 		// Version checks
@@ -91,31 +121,60 @@ func (e *Engine) Assess(session models.EmailSession) []models.Finding {
 			})
 		}
 
-		// Weak Ciphers
-		if strings.Contains(session.TLS.CipherSuite, "RC4") || strings.Contains(session.TLS.CipherSuite, "3DES") || strings.Contains(session.TLS.CipherSuite, "DES") {
-			findings = append(findings, models.Finding{
-				ID:          fmt.Sprintf("CIPHER-001-%s", session.ID),
-				Title:       "Obsolete/Weak Cipher Suite Negotiated",
-				Severity:    models.SeverityCritical,
-				Category:    "CIPHER",
-				SessionID:   session.ID,
-				Description: fmt.Sprintf("The negotiated cipher suite %s relies on broken or vulnerable cryptographic primitives.", session.TLS.CipherSuite),
-				Evidence:    []string{fmt.Sprintf("Cipher Suite: %s", session.TLS.CipherSuite)},
-				Recommendation: "Reconfigure cipher suites to include only AES-GCM, CHACHA20-POLY1305, and modern AEAD ciphers.",
-			})
+		// Weak Ciphers / Non-AEAD
+		if session.TLS.CipherSuite != "" {
+			cinfo := ClassifyCipher(session.TLS.CipherSuite)
+			
+			if cinfo.IsWeak {
+				findings = append(findings, models.Finding{
+					ID:          fmt.Sprintf("CIPHER-001-%s", session.ID),
+					Title:       "Obsolete/Weak Cipher Suite Negotiated",
+					Severity:    models.SeverityCritical,
+					Category:    "CIPHER",
+					SessionID:   session.ID,
+					Description: fmt.Sprintf("The negotiated cipher suite %s relies on broken or vulnerable cryptographic primitives.", session.TLS.CipherSuite),
+					Evidence:    []string{fmt.Sprintf("Cipher Suite: %s", session.TLS.CipherSuite)},
+					Recommendation: "Reconfigure cipher suites to include only AES-GCM, CHACHA20-POLY1305, and modern AEAD ciphers.",
+				})
+			} else if !cinfo.IsAEAD {
+				findings = append(findings, models.Finding{
+					ID:          fmt.Sprintf("CIPHER-002-%s", session.ID),
+					Title:       "Non-AEAD Cipher Negotiated",
+					Severity:    models.SeverityMedium,
+					Category:    "CIPHER",
+					SessionID:   session.ID,
+					Description: fmt.Sprintf("The cipher %s is not an Authenticated Encryption with Associated Data (AEAD) cipher, which is less robust against tampering.", session.TLS.CipherSuite),
+					Evidence:    []string{fmt.Sprintf("Cipher Suite: %s is type %s", session.TLS.CipherSuite, cinfo.Type)},
+					Recommendation: "Prioritize AEAD ciphers like GCM or CHACHA20-POLY1305.",
+				})
+			}
+
+			// Forward Secrecy Check via Cipher
+			if e.Policy.RequireForwardSecrecy && !cinfo.IsPFS {
+				findings = append(findings, models.Finding{
+					ID:          fmt.Sprintf("FS-001-%s", session.ID),
+					Title:       "Lack of Perfect Forward Secrecy (PFS)",
+					Severity:    models.SeverityMedium,
+					Category:    "KEY_EXCHANGE",
+					SessionID:   session.ID,
+					Description: "The negotiated session cipher does not support Perfect Forward Secrecy, exposing past recorded traffic to decryption if long-term RSA keys are compromised.",
+					Evidence:    []string{fmt.Sprintf("Cipher: %s", session.TLS.CipherSuite), fmt.Sprintf("Key Exchange: %s", cinfo.KeyExchangeAlg)},
+					Recommendation: "Configure server key exchange algorithms to prioritize ECDHE or DHE key exchange.",
+				})
+			}
 		}
 
-		// Forward Secrecy Check
-		if e.Policy.RequireForwardSecrecy && session.ForwardSecrecy == models.FSNo {
+		// TLS Handshake Failure / Alerts
+		if session.TLS.AlertCount > 0 || !session.TLS.HandshakeSucceeded {
 			findings = append(findings, models.Finding{
-				ID:          fmt.Sprintf("FS-001-%s", session.ID),
-				Title:       "Lack of Perfect Forward Secrecy (PFS)",
-				Severity:    models.SeverityMedium,
-				Category:    "KEY_EXCHANGE",
+				ID:          fmt.Sprintf("TLS-FAIL-001-%s", session.ID),
+				Title:       "TLS Handshake Failure / Alert",
+				Severity:    models.SeverityHigh,
+				Category:    "TLS",
 				SessionID:   session.ID,
-				Description: "The negotiated session cipher does not support Perfect Forward Secrecy, exposing past recorded traffic to decryption if long-term RSA keys are compromised.",
-				Evidence:    []string{fmt.Sprintf("Cipher: %s", session.TLS.CipherSuite), "Forward Secrecy: NO"},
-				Recommendation: "Configure server key exchange algorithms to prioritize ECDHE or DHE key exchange.",
+				Description: "The TLS handshake failed or generated alert messages.",
+				Evidence:    []string{fmt.Sprintf("Alert Count: %d", session.TLS.AlertCount), fmt.Sprintf("Handshake Succeeded: %t", session.TLS.HandshakeSucceeded)},
+				Recommendation: "Investigate TLS connectivity issues, possible certificate trust errors on client, or incompatible ciphers.",
 			})
 		}
 	}
@@ -158,6 +217,20 @@ func (e *Engine) Assess(session models.EmailSession) []models.Finding {
 				Description: fmt.Sprintf("The certificate public key is an RSA %d-bit key, below the required minimum of %d bits.", session.Certificate.KeyBits, e.Policy.MinimumRSABits),
 				Evidence:    []string{fmt.Sprintf("Public Key: RSA %d bits", session.Certificate.KeyBits)},
 				Recommendation: "Re-issue certificate with an RSA key size of at least 2048 bits or switch to ECDSA (P-256/P-384).",
+			})
+		}
+
+		sigAlgUpper := strings.ToUpper(session.Certificate.SignatureAlgorithm)
+		if strings.Contains(sigAlgUpper, "MD5") || strings.Contains(sigAlgUpper, "SHA1") {
+			findings = append(findings, models.Finding{
+				ID:          fmt.Sprintf("SIG-001-%s", session.ID),
+				Title:       "Weak Certificate Signature Algorithm",
+				Severity:    models.SeverityCritical,
+				Category:    "CERTIFICATE",
+				SessionID:   session.ID,
+				Description: fmt.Sprintf("The certificate uses a weak signature algorithm (%s) susceptible to collision attacks.", session.Certificate.SignatureAlgorithm),
+				Evidence:    []string{fmt.Sprintf("Signature Algorithm: %s", session.Certificate.SignatureAlgorithm)},
+				Recommendation: "Re-issue certificate using SHA-256 or stronger.",
 			})
 		}
 	}
