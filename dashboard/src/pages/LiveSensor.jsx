@@ -27,16 +27,43 @@ export default function LiveSensorPage() {
   }, []);
 
   useEffect(() => {
-    const ws = new WebSocket(`${WS_URL}/analyses/live/events`);
-    ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (msg.type) {
-           setEvents(prev => [msg, ...prev].slice(0, 100)); // Keep last 100 events
-        }
-      } catch (err) {}
+    let ws;
+    let reconnectTimeout;
+
+    const connectWS = () => {
+      ws = new WebSocket(`${WS_URL}/analyses/live/events`);
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          
+          // Normalize backend event structures
+          if (msg.type) {
+             setEvents(prev => [msg, ...prev].slice(0, 100)); // Keep last 100 events
+          } else if (msg.stage) {
+             // Map ProgressEvent to the expected event shape
+             const normalizedMsg = {
+               type: "analysis." + msg.stage.toLowerCase(),
+               data: { message: msg.message, progress: msg.progress, id: msg.analysis_id }
+             };
+             setEvents(prev => [normalizedMsg, ...prev].slice(0, 100));
+          }
+        } catch (err) {}
+      };
+      
+      ws.onclose = () => {
+        reconnectTimeout = setTimeout(connectWS, 2000);
+      };
     };
-    return () => ws.close();
+
+    connectWS();
+
+    return () => {
+      clearTimeout(reconnectTimeout);
+      if (ws) {
+        ws.onclose = null;
+        ws.close();
+      }
+    };
   }, []);
 
   const handleStart = async () => {
@@ -102,7 +129,7 @@ export default function LiveSensorPage() {
                    <Play size={16} /> START LIVE CAPTURE
                  </button>
                ) : (
-                 <button className="btn" onClick={handleStop} style={{ height: 42, background: 'var(--accent-red)', color: 'white', display: 'flex', alignItems: 'center', gap: 8 }}>
+                 <button className="btn" onClick={handleStop} style={{ height: 42, background: '#ef4444', color: 'white', border: 'none', display: 'flex', alignItems: 'center', gap: 8 }}>
                    <Square size={16} /> STOP LIVE CAPTURE
                  </button>
                )}

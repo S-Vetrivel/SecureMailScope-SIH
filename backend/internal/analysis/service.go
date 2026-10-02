@@ -120,7 +120,41 @@ func (s *Service) ExecutePipeline(id string) error {
 	s.emitEvent(id, models.StatusParsing, 10, "Parsing PCAP packets")
 	_ = s.repo.UpdateAnalysisStatus(id, models.StatusParsing, "")
 
-	reader := capture.NewPCAPReader(analysis.PCAPPath)
+	// Support seamless streams across chunk boundaries by merging with the previous chunk.
+	// Only merge if the previous chunk is non-trivial (> 100 bytes).
+	targetPCAP := analysis.PCAPPath
+	var mergedPCAP string
+	if strings.Contains(analysis.PCAPPath, "live-capture") {
+		dir := filepath.Dir(analysis.PCAPPath)
+		files, err := filepath.Glob(filepath.Join(dir, "live-capture-*.pcap"))
+		if err == nil {
+			var prevPCAPPath string
+			for i, f := range files {
+				if f == analysis.PCAPPath && i > 0 {
+					prevPCAPPath = files[i-1]
+					break
+				}
+			}
+			if prevPCAPPath != "" {
+				// Skip merging if the previous chunk is too small (header-only = empty capture)
+				if info, err := os.Stat(prevPCAPPath); err == nil && info.Size() > 100 {
+					mergedPCAP = filepath.Join(dir, "merged-"+filepath.Base(analysis.PCAPPath))
+					// Use -F pcap to keep legacy pcap format (avoids PCAPNG which our reader handles
+					// differently and may have LinkType resolution issues)
+					cmd := exec.Command("mergecap", "-F", "pcap", "-w", mergedPCAP, prevPCAPPath, analysis.PCAPPath)
+					if err := cmd.Run(); err == nil {
+						targetPCAP = mergedPCAP
+						defer os.Remove(mergedPCAP)
+						log.Printf("[ANALYSIS] %s: merged %s + %s", id, filepath.Base(prevPCAPPath), filepath.Base(analysis.PCAPPath))
+					} else {
+						log.Printf("[ANALYSIS] %s: mergecap failed, using current chunk only", id)
+					}
+				}
+			}
+		}
+	}
+
+	reader := capture.NewPCAPReader(targetPCAP)
 	reassembler := session.NewStreamReassembler()
 
 	totalPackets, err := reader.ReadPackets(func(pkt capture.PacketMetadata) error {
@@ -143,6 +177,28 @@ func (s *Service) ExecutePipeline(id string) error {
 	_ = s.repo.UpdateAnalysisStatus(id, models.StatusDetectingProtocols, "")
 
 	detector := protocol.NewDetector()
+
+	// PRE-ANALYSIS: Check if there's any actual email traffic before doing heavy extraction and AI risk processing.
+	// Check both directions: client→server and server→client port assignments
+	hasEmail := false
+	for _, stream := range streams {
+		// Try both port orderings — the reassembler may assign client/server differently
+		det1 := detector.Detect(stream.ClientPort, stream.ServerPort, stream.FullPayload)
+		det2 := detector.Detect(stream.ServerPort, stream.ClientPort, stream.FullPayload)
+		if det1.Protocol == "SMTP" || det1.Protocol == "IMAP" || det1.Protocol == "POP3" ||
+			det2.Protocol == "SMTP" || det2.Protocol == "IMAP" || det2.Protocol == "POP3" {
+			hasEmail = true
+			break
+		}
+	}
+
+	if !hasEmail && strings.Contains(analysis.PCAPPath, "live-capture") {
+		// Drop garbage live captures to keep the DB clean
+		s.repo.DeleteAnalysis(id)
+		os.Remove(analysis.PCAPPath)
+		log.Printf("[ANALYSIS] %s: no email traffic found in %d streams, dropping", id, len(streams))
+		return nil
+	}
 	timelineAnalyzer := protocol.NewTimelineAnalyzer()
 	certParser := certificate.NewParser()
 
@@ -153,7 +209,7 @@ func (s *Service) ExecutePipeline(id string) error {
 	// Map from tcp stream connection key → TLSInfo
 	tlsByKey := make(map[session.ConnectionKey]models.TLSInfo)
 	if s.tsharkInspector.Available() {
-		tsharkTLS, _ := s.tsharkInspector.Inspect(analysis.PCAPPath)
+		tsharkTLS, _ := s.tsharkInspector.Inspect(targetPCAP)
 		for _, t := range tsharkTLS {
 			key := session.MakeConnectionKey(t.ClientIP, t.ClientPort, t.ServerIP, t.ServerPort)
 			tlsByKey[key] = t
@@ -170,7 +226,12 @@ func (s *Service) ExecutePipeline(id string) error {
     var parsedSessions []models.EmailSession
 
 	for idx, stream := range streams {
-		sessionID := fmt.Sprintf("%s-S%03d", id, idx+1)
+		var sessionID string
+		if strings.Contains(analysis.PCAPPath, "live-capture") {
+			sessionID = fmt.Sprintf("live-%s-%d-%s-%d-%d", stream.ClientIP, stream.ClientPort, stream.ServerIP, stream.ServerPort, stream.StartTime.Unix())
+		} else {
+			sessionID = fmt.Sprintf("%s-S%03d", id, idx+1)
+		}
 		det := detector.Detect(stream.ClientPort, stream.ServerPort, stream.FullPayload)
 		events, starttlsInfo := timelineAnalyzer.Analyze(det.Protocol, stream)
 

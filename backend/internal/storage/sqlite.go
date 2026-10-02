@@ -119,6 +119,13 @@ func (r *Repository) initSchema() error {
 	return nil
 }
 
+func (r *Repository) DeleteAnalysis(id string) error {
+	_, _ = r.db.Exec("DELETE FROM sessions WHERE analysis_id = ?", id)
+	_, _ = r.db.Exec("DELETE FROM findings WHERE analysis_id = ?", id)
+	_, err := r.db.Exec("DELETE FROM analyses WHERE id = ?", id)
+	return err
+}
+
 func (r *Repository) CreateAnalysis(a *models.Analysis) error {
 	query := `INSERT INTO analyses (id, pcap_path, pcap_filename, status, started_at, total_packets, total_sessions, severity_breakdown, error) 
 	          VALUES (?, ?, ?, ?, ?, ?, ?, '{}', ?)`

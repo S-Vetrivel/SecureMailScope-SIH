@@ -2,6 +2,7 @@ package capture
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -11,19 +12,19 @@ import (
 )
 
 type PacketMetadata struct {
-	Timestamp      time.Time
-	SrcIP          string
-	DstIP          string
-	SrcPort        uint16
-	DstPort        uint16
-	Transport      string
-	Length         int
-	TCPSeq         uint32
-	TCPAck         uint32
-	TCPFlags       string
-	Payload        []byte
-	NetFlow        gopacket.Flow
-	TCP            *layers.TCP
+	Timestamp time.Time
+	SrcIP     string
+	DstIP     string
+	SrcPort   uint16
+	DstPort   uint16
+	Transport string
+	Length    int
+	TCPSeq    uint32
+	TCPAck    uint32
+	TCPFlags  string
+	Payload   []byte
+	NetFlow   gopacket.Flow
+	TCP       *layers.TCP
 }
 
 type PCAPReader struct {
@@ -41,30 +42,43 @@ func (r *PCAPReader) ReadPackets(onPacket func(pkt PacketMetadata) error) (int, 
 	}
 	defer f.Close()
 
-	// Check magic bytes to select pcap vs pcapng reader
+	// Read magic bytes to distinguish pcap from pcapng
 	magic := make([]byte, 4)
 	if _, err := f.ReadAt(magic, 0); err != nil {
 		return 0, fmt.Errorf("failed to read header magic for %s: %w", r.Path, err)
 	}
 
 	var packetSource *gopacket.PacketSource
+	var linkType layers.LinkType
+
 	if magic[0] == 0x0a && magic[1] == 0x0d && magic[2] == 0x0d && magic[3] == 0x0a {
 		// PCAPNG format
 		ngReader, err := pcapgo.NewNgReader(f, pcapgo.DefaultNgReaderOptions)
 		if err != nil {
 			return 0, fmt.Errorf("failed to create pcapgo ng reader for %s: %w", r.Path, err)
 		}
-		packetSource = gopacket.NewPacketSource(ngReader, ngReader.LinkType())
+		linkType = ngReader.LinkType()
+		log.Printf("[READER] %s: PCAPNG, LinkType=%v (%d)", r.Path, linkType, int(linkType))
+		packetSource = gopacket.NewPacketSource(ngReader, linkType)
 	} else {
 		// Standard PCAP format
 		rdr, err := pcapgo.NewReader(f)
 		if err != nil {
 			return 0, fmt.Errorf("failed to create pcapgo reader for %s: %w", r.Path, err)
 		}
-		packetSource = gopacket.NewPacketSource(rdr, rdr.LinkType())
+		linkType = rdr.LinkType()
+		log.Printf("[READER] %s: PCAP, LinkType=%v (%d)", r.Path, linkType, int(linkType))
+		packetSource = gopacket.NewPacketSource(rdr, linkType)
+	}
+
+	// Allow lazy decoding for performance
+	packetSource.DecodeOptions = gopacket.DecodeOptions{
+		Lazy:   false,
+		NoCopy: true,
 	}
 
 	packetCount := 0
+	tcpCount := 0
 
 	for packet := range packetSource.Packets() {
 		packetCount++
@@ -73,23 +87,36 @@ func (r *PCAPReader) ReadPackets(onPacket func(pkt PacketMetadata) error) (int, 
 			Length:    packet.Metadata().Length,
 		}
 
-		// Network layer (IPv4 or IPv6)
+		// Network layer — try IPv4 then IPv6
+		var gotIP bool
 		if ip4Layer := packet.Layer(layers.LayerTypeIPv4); ip4Layer != nil {
 			ip4, _ := ip4Layer.(*layers.IPv4)
 			meta.SrcIP = ip4.SrcIP.String()
 			meta.DstIP = ip4.DstIP.String()
 			meta.NetFlow = ip4.NetworkFlow()
+			gotIP = true
 		} else if ip6Layer := packet.Layer(layers.LayerTypeIPv6); ip6Layer != nil {
 			ip6, _ := ip6Layer.(*layers.IPv6)
 			meta.SrcIP = ip6.SrcIP.String()
 			meta.DstIP = ip6.DstIP.String()
 			meta.NetFlow = ip6.NetworkFlow()
-		} else {
-			// Skip non-IP packets safely
+			gotIP = true
+		}
+
+		if !gotIP {
+			// Log the first few unknown packets to help diagnose LinkType issues
+			if packetCount <= 3 {
+				var layerNames []string
+				for _, l := range packet.Layers() {
+					layerNames = append(layerNames, l.LayerType().String())
+				}
+				log.Printf("[READER] pkt#%d: no IP layer found, layers=%v, data[0:4]=%x",
+					packetCount, layerNames, packet.Data()[:min(4, len(packet.Data()))])
+			}
 			continue
 		}
 
-		// Transport layer (TCP)
+		// Transport layer — TCP only
 		if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 			tcp, _ := tcpLayer.(*layers.TCP)
 			meta.SrcPort = uint16(tcp.SrcPort)
@@ -100,8 +127,8 @@ func (r *PCAPReader) ReadPackets(onPacket func(pkt PacketMetadata) error) (int, 
 			meta.Payload = tcp.Payload
 			meta.TCPFlags = formatTCPFlags(tcp)
 			meta.TCP = tcp
+			tcpCount++
 		} else {
-			// Ignore non-TCP safely
 			continue
 		}
 
@@ -110,6 +137,7 @@ func (r *PCAPReader) ReadPackets(onPacket func(pkt PacketMetadata) error) (int, 
 		}
 	}
 
+	log.Printf("[READER] %s: read %d total packets, %d TCP", r.Path, packetCount, tcpCount)
 	return packetCount, nil
 }
 

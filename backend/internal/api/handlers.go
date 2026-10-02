@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -26,6 +27,7 @@ type Server struct {
 	uploadDir   string
 	upgrader    websocket.Upgrader
 	wsMu        sync.RWMutex
+	wsWriteMu   sync.Mutex
 	wsClients   map[*websocket.Conn]bool
 	captureMgr  *capture.LiveCaptureManager
 }
@@ -55,7 +57,8 @@ func NewServer(repo *storage.Repository, service *analysis.Service, uploadDir st
 			}
 		},
 		func(eventType string, data interface{}) {
-			srv.broadcastRawWSEvent(fmt.Sprintf(`{"type": "%s", "data": %v}`, eventType, data))
+			b, _ := json.Marshal(data)
+			srv.broadcastRawWSEvent(fmt.Sprintf(`{"type": "%s", "data": %s}`, eventType, string(b)))
 		},
 	)
 
@@ -309,7 +312,10 @@ func (s *Server) broadcastWSEvent(evt analysis.ProgressEvent) {
 	s.wsMu.RUnlock()
 
 	for _, client := range clients {
-		if err := client.WriteJSON(evt); err != nil {
+		s.wsWriteMu.Lock()
+		err := client.WriteJSON(evt)
+		s.wsWriteMu.Unlock()
+		if err != nil {
 			client.Close()
 			s.wsMu.Lock()
 			delete(s.wsClients, client)
@@ -327,7 +333,10 @@ func (s *Server) broadcastRawWSEvent(msg string) {
 	s.wsMu.RUnlock()
 
 	for _, client := range clients {
-		if err := client.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
+		s.wsWriteMu.Lock()
+		err := client.WriteMessage(websocket.TextMessage, []byte(msg))
+		s.wsWriteMu.Unlock()
+		if err != nil {
 			client.Close()
 			s.wsMu.Lock()
 			delete(s.wsClients, client)
