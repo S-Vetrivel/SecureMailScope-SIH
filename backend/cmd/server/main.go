@@ -7,12 +7,15 @@ import (
 	"path/filepath"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	"github.com/securemailscope/backend/internal/analysis"
 	"github.com/securemailscope/backend/internal/api"
 	"github.com/securemailscope/backend/internal/storage"
 )
 
 func main() {
+	_ = godotenv.Load("../.env", "../.env.example")
+	
 	dbPath := os.Getenv("DB_PATH")
 	if dbPath == "" {
 		dbPath = "./data/securemailscope.db"
