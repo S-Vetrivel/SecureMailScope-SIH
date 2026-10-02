@@ -22,8 +22,8 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <div className="logo-icon">
-          <Shield size={20} color="white" />
+        <div className="logo-icon" style={{ background: 'transparent' }}>
+          <img src="/favicon.png" alt="Logo" style={{ width: 24, height: 24, objectFit: 'contain' }} />
         </div>
         <div>
           <h1>SecureMailScope</h1>
