@@ -14,7 +14,11 @@ COPY backend/ .
 RUN CGO_ENABLED=1 GOOS=linux go build -o server ./cmd/server
 
 FROM python:3.11-slim AS final
-RUN apt-get update && apt-get install -y tshark iproute2 curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y tshark iproute2 curl nginx && rm -rf /var/lib/apt/lists/*
+
+# Configure Nginx
+RUN rm /etc/nginx/sites-enabled/default
+COPY nginx.conf /etc/nginx/sites-enabled/securemailscope.conf
 
 WORKDIR /app
 

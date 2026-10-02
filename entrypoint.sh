@@ -34,5 +34,10 @@ fi
 echo "[STARTUP] Available network interfaces for capture:"
 ip link show | grep -E '^[0-9]+:' | awk -F: '{print $2}' | sed 's/^[ \t]*//'
 
-echo "[STARTUP] Starting SecureMailScope Backend on port ${PORT:-6000}..."
-exec /app/server
+echo "[STARTUP] Starting SecureMailScope Backend internally on port 8000..."
+export PORT=8000
+/app/server &
+BACKEND_PID=$!
+
+echo "[STARTUP] Starting Internal Nginx on port 6000..."
+nginx -g "daemon off;"
