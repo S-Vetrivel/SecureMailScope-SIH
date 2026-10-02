@@ -87,9 +87,10 @@ export function getReportURL(analysisId, format = "json") {
   return `${API_BASE}/analyses/${analysisId}/report?format=${format}`;
 }
 
-export const WS_URL = API_BASE.startsWith("http") 
-  ? API_BASE.replace("http", "ws") 
-  : `ws://${window.location.host}${API_BASE}`;
+const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+export const WS_URL = API_BASE.startsWith("http")
+  ? API_BASE.replace(/^http/, wsProtocol.replace(":", ""))
+  : `${wsProtocol}//${window.location.host}${API_BASE}`;
 
 export async function fetchCaptureStatus() {
   const res = await fetch(`${API_BASE}/capture/status`);

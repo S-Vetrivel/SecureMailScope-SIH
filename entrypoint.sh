@@ -35,9 +35,16 @@ echo "[STARTUP] Available network interfaces for capture:"
 ip link show | grep -E '^[0-9]+:' | awk -F: '{print $2}' | sed 's/^[ \t]*//'
 
 echo "[STARTUP] Starting SecureMailScope Backend internally on port 8000..."
-export PORT=8000
+export HTTP_PORT=8000
 /app/server &
 BACKEND_PID=$!
+
+# Wait for Go backend to actually start listening on 8000
+echo "[STARTUP] Waiting for backend to start on port 8000..."
+while ! curl -s http://127.0.0.1:8000/api/v1/health > /dev/null; do
+    sleep 1
+done
+echo "[STARTUP] Backend is healthy!"
 
 echo "[STARTUP] Starting Internal Nginx on port 6000..."
 nginx -g "daemon off;"
