@@ -20,8 +20,9 @@ import {
   AlertTriangle,
   TrendingUp,
   Wifi,
+  Cpu,
 } from "lucide-react";
-import { fetchDashboardSummary } from "../lib/api";
+import { fetchDashboardSummary, fetchAIStatus } from "../lib/api";
 
 
 
@@ -51,13 +52,15 @@ function scoreColor(score) {
 
 export default function DashboardPage() {
   const [data, setData] = useState(null);
+  const [aiStatus, setAiStatus] = useState(null);
   const [isLive, setIsLive] = useState(true);
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    fetchDashboardSummary()
-      .then((d) => {
+    Promise.all([fetchDashboardSummary(), fetchAIStatus().catch(() => null)])
+      .then(([d, ai]) => {
         setData(d);
+        if (ai) setAiStatus(ai);
         setIsLive(true);
         setError(false);
       })
@@ -140,6 +143,40 @@ export default function DashboardPage() {
         </header>
 
         <div className="page-content animate-in">
+          {/* ====== AI Status Panel ====== */}
+          {aiStatus && (
+            <div className="card" style={{ marginBottom: 24, borderLeft: aiStatus.active_provider === 'none' ? '4px solid #ef4444' : aiStatus.fallback_active ? '4px solid #f97316' : '4px solid #10b981' }}>
+              <div className="card-header">
+                <span className="card-title">AI STATUS</span>
+                <Cpu size={20} color={aiStatus.active_provider === 'none' ? '#ef4444' : aiStatus.fallback_active ? '#f97316' : '#10b981'} />
+              </div>
+              <div style={{ paddingBottom: 16 }}>
+                {aiStatus.active_provider === 'remote' && (
+                  <>
+                    <h3 style={{ color: '#10b981', display: 'flex', alignItems: 'center', gap: 8 }}><span className="status-dot" style={{ background: '#10b981'}}/> Remote GPU Online</h3>
+                    <p style={{ color: 'var(--text-muted)' }}>Provider: Remote Ollama</p>
+                    <p style={{ color: 'var(--text-muted)' }}>Model: {aiStatus.remote.model}</p>
+                    <p style={{ color: 'var(--text-muted)' }}>Latency: {aiStatus.remote.latency_ms} ms</p>
+                  </>
+                )}
+                {aiStatus.active_provider === 'local' && (
+                  <>
+                    <h3 style={{ color: '#f97316', display: 'flex', alignItems: 'center', gap: 8 }}><span className="status-dot" style={{ background: '#f97316'}}/> Local Fallback Active</h3>
+                    <p style={{ color: 'var(--text-muted)' }}>Provider: VPS Ollama</p>
+                    <p style={{ color: 'var(--text-muted)' }}>Model: {aiStatus.local.model}</p>
+                    <p style={{ color: 'var(--text-muted)' }}>Latency: {aiStatus.local.latency_ms} ms</p>
+                  </>
+                )}
+                {aiStatus.active_provider === 'none' && (
+                  <>
+                    <h3 style={{ color: '#ef4444', display: 'flex', alignItems: 'center', gap: 8 }}><span className="status-dot" style={{ background: '#ef4444'}}/> AI Unavailable</h3>
+                    <p style={{ color: 'var(--text-muted)' }}>Deterministic forensic analysis remains active.</p>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ====== Stats Row ====== */}
           <div className="stats-grid">
             <div className="card">

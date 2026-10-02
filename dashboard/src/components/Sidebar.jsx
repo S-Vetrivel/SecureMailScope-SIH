@@ -5,10 +5,12 @@ import {
   FileSearch,
   FileText,
   Shield,
+  Radio,
 } from "lucide-react";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/live", label: "Live Sensor", icon: Radio },
   { href: "/upload", label: "Upload PCAP", icon: Upload },
   { href: "/analyses", label: "Analyses", icon: FileSearch },
   { href: "/reports", label: "Reports", icon: FileText },

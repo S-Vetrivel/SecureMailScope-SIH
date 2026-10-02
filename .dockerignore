@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.git/
+.vscode/
+data/
+uploads/
+pcaps/
+*.pcap
+__pycache__/
+venv/

@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/jung-kurt/gofpdf"
 	"github.com/securemailscope/backend/internal/analysis"
+	"github.com/securemailscope/backend/internal/capture"
 	"github.com/securemailscope/backend/internal/models"
 	"github.com/securemailscope/backend/internal/storage"
 )
@@ -26,6 +27,7 @@ type Server struct {
 	upgrader    websocket.Upgrader
 	wsMu        sync.RWMutex
 	wsClients   map[*websocket.Conn]bool
+	captureMgr  *capture.LiveCaptureManager
 }
 
 func NewServer(repo *storage.Repository, service *analysis.Service, uploadDir string) *Server {
@@ -44,6 +46,19 @@ func NewServer(repo *storage.Repository, service *analysis.Service, uploadDir st
 		wsClients: make(map[*websocket.Conn]bool),
 	}
 
+	srv.captureMgr = capture.NewLiveCaptureManager(
+		filepath.Join(uploadDir, "live"),
+		func(pcapPath string) {
+			analysis, err := service.CreateAnalysis(pcapPath)
+			if err == nil {
+				service.RunAnalysisAsync(analysis.ID)
+			}
+		},
+		func(eventType string, data interface{}) {
+			srv.broadcastRawWSEvent(fmt.Sprintf(`{"type": "%s", "data": %v}`, eventType, data))
+		},
+	)
+
 	service.SubscribeEvents(srv.broadcastWSEvent)
 	service.SubscribeRawEvents(srv.broadcastRawWSEvent)
 	return srv
@@ -53,6 +68,7 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 	v1 := r.Group("/api/v1")
 	{
 		v1.GET("/health", s.HealthCheck)
+		v1.GET("/ai/status", s.GetAIStatus)
 		v1.POST("/pcaps", s.UploadPCAP)
 
 		v1.POST("/analyses", s.CreateAnalysis)
@@ -70,6 +86,14 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 		v1.GET("/analyses/:id/report", s.GetAnalysisReport)
 		v1.GET("/summary", s.GetDashboardSummary)
 		v1.GET("/analyses/:id/events", s.WebSocketEvents)
+
+		// Live Capture Endpoints
+		v1.GET("/capture/status", s.GetCaptureStatus)
+		v1.POST("/capture/start", s.StartCapture)
+		v1.POST("/capture/stop", s.StopCapture)
+		v1.GET("/capture/interfaces", s.GetCaptureInterfaces)
+		v1.GET("/capture/stats", s.GetCaptureStats)
+		v1.POST("/capture/filter", s.SetCaptureFilter)
 	}
 }
 
@@ -81,6 +105,14 @@ func (s *Server) HealthCheck(c *gin.Context) {
 			"tshark":  true,
 		},
 	})
+}
+
+func (s *Server) GetAIStatus(c *gin.Context) {
+	if s.service.GetAIRouter() != nil {
+		c.JSON(http.StatusOK, s.service.GetAIRouter().GetStatus())
+	} else {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AI Router not initialized"})
+	}
 }
 
 func (s *Server) UploadPCAP(c *gin.Context) {
@@ -635,3 +667,57 @@ func generatePDFReport(analysis *models.Analysis, sessions []models.EmailSession
 	err := pdf.Output(&buf)
 	return []byte(buf.String()), err
 }
+
+func (s *Server) GetCaptureStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, s.captureMgr.Stats())
+}
+
+func (s *Server) StartCapture(c *gin.Context) {
+	var body struct {
+		Interface string `json:"interface" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		return
+	}
+
+	if err := s.captureMgr.Start(body.Interface); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "started", "interface": body.Interface})
+}
+
+func (s *Server) StopCapture(c *gin.Context) {
+	if err := s.captureMgr.Stop(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "stopped"})
+}
+
+func (s *Server) GetCaptureInterfaces(c *gin.Context) {
+	interfaces, err := s.captureMgr.GetInterfaces()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"interfaces": interfaces})
+}
+
+func (s *Server) GetCaptureStats(c *gin.Context) {
+	c.JSON(http.StatusOK, s.captureMgr.Stats())
+}
+
+func (s *Server) SetCaptureFilter(c *gin.Context) {
+	var body struct {
+		Filter string `json:"filter" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		return
+	}
+	s.captureMgr.SetFilter(body.Filter)
+	c.JSON(http.StatusOK, gin.H{"status": "filter updated"})
+}
+

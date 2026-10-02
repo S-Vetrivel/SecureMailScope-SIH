@@ -12,6 +12,12 @@ export async function fetchDashboardSummary() {
   return res.json();
 }
 
+export async function fetchAIStatus() {
+  const res = await fetch(`${API_BASE}/ai/status`);
+  if (!res.ok) throw new Error("Failed to fetch AI status");
+  return res.json();
+}
+
 export async function fetchAnalyses() {
   const res = await fetch(`${API_BASE}/analyses`);
   if (!res.ok) throw new Error("Failed to fetch analyses");
@@ -80,3 +86,44 @@ export async function uploadPCAP(file) {
 export function getReportURL(analysisId, format = "json") {
   return `${API_BASE}/analyses/${analysisId}/report?format=${format}`;
 }
+
+export const WS_URL = API_BASE.startsWith("http") 
+  ? API_BASE.replace("http", "ws") 
+  : `ws://${window.location.host}${API_BASE}`;
+
+export async function fetchCaptureStatus() {
+  const res = await fetch(`${API_BASE}/capture/status`);
+  if (!res.ok) throw new Error("Failed to fetch capture status");
+  return res.json();
+}
+
+export async function fetchInterfaces() {
+  const res = await fetch(`${API_BASE}/capture/interfaces`);
+  if (!res.ok) throw new Error("Failed to fetch interfaces");
+  return res.json();
+}
+
+export async function startCapture(iface) {
+  const res = await fetch(`${API_BASE}/capture/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ interface: iface }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "Failed to start capture");
+  }
+  return res.json();
+}
+
+export async function stopCapture() {
+  const res = await fetch(`${API_BASE}/capture/stop`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "Failed to stop capture");
+  }
+  return res.json();
+}
+

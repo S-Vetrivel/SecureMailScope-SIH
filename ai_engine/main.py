@@ -206,7 +206,7 @@ def generate_session_assessment(row: dict, orig_session: dict, is_anomalous: boo
         if is_encrypted and tls_version in ("TLS 1.2", "TLS 1.3"):
             assessment_parts.append("Session passes Isolation Forest anomaly detection — cryptographic parameters are consistent with baseline traffic.")
 
-    # Prepare evidence for Ollama LLM
+    # Prepare evidence for Ollama LLM in Go Backend
     evidence = {
         "session_context": {
             "protocol": protocol,
@@ -227,23 +227,12 @@ def generate_session_assessment(row: dict, orig_session: dict, is_anomalous: boo
         }
     }
 
-    # Ask the small AI agent for reasoning, correlation, and explanation
-    llm_resp = generate_llm_assessment(evidence)
-
-    # Fallback structure if LLM didn't return proper JSON
-    if "executive_interpretation" not in llm_resp:
-        fallback_text = llm_resp.get("ai_assessment", " ".join(assessment_parts) if assessment_parts else "Session assessed \u2014 no significant cryptographic anomalies detected.")
-        llm_resp = {
-            "executive_interpretation": "AI Engine unavailable or returned unstructured response.",
-            "evidence_correlation": [],
-            "ai_reasoning": fallback_text,
-            "priority": "UNKNOWN",
-            "recommended_actions": []
-        }
-
+    # Instead of blocking on LLM here, just return the findings and raw text.
+    # Go will enqueue the session to the AI Router.
     return {
         "findings": findings,
-        "ai_assessment_structured": llm_resp,
+        "ai_assessment": " ".join(assessment_parts) if assessment_parts else "Session assessed \u2014 no significant cryptographic anomalies detected.",
+        "evidence_json": evidence
     }
 
 
@@ -325,33 +314,9 @@ def main():
             })
     print(f"  → Generated recommendations for {len(all_remediations)} session(s)")
 
-    # ---- Step 5: Global AI Assessment Stream ----
-    print("\n[5/5] Streaming global AI assessment to frontend...")
-    # Gather evidence from all sessions
-    all_evidence = []
-    for i, (_, row) in enumerate(df.iterrows()):
-        row_dict = row.to_dict()
-        session_id = row_dict.get("session_id", "")
-        orig_session = {}
-        for s in sessions:
-            if s.get("id") == session_id or s.get("session_id") == session_id:
-                orig_session = s
-                break
-                
-        all_evidence.append({
-            "session_id": session_id,
-            "protocol": row_dict.get("protocol", "Unknown"),
-            "risk_score": float(row_dict.get("risk_score", 1.0)),
-            "findings": [f["title"] for f in session_assessments[i]["findings"]],
-            "is_anomalous": bool(row_dict.get("is_anomalous", False)),
-            "anomaly_score": float(row_dict.get("anomaly_score", 0.0)),
-            "tls_version": row_dict.get("tls_version"),
-            "cipher": row_dict.get("negotiated_cipher"),
-            "starttls_state": orig_session.get("starttls", {}).get("state"),
-            "handshake_completed": orig_session.get("tls", {}).get("handshake_completed"),
-        })
-    
-    global_ai_assessment = generate_global_assessment_stream(all_evidence)
+    # ---- Step 5: Global AI Assessment Stream (Moved to Go Backend) ----
+    print("\n[5/5] Skipping global AI assessment stream in Python (Moved to Go)...")
+    global_ai_assessment = ""
 
     # ---- Build Final Output ----
     results = build_results(df, anomaly_explanations, all_remediations, session_assessments, go_id_map, args.input)

@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 	"github.com/securemailscope/backend/internal/analysis"
@@ -30,6 +31,11 @@ func main() {
 	frontendOrigin := os.Getenv("FRONTEND_ORIGIN")
 	if frontendOrigin == "" {
 		frontendOrigin = "http://localhost:3000"
+	}
+
+	frontendDir := os.Getenv("FRONTEND_DIR")
+	if frontendDir == "" {
+		frontendDir = "../dashboard/dist"
 	}
 
 	// Initialize Storage SQLite
@@ -67,6 +73,12 @@ func main() {
 	})
 
 	server.RegisterRoutes(router)
+
+	// Serve React Frontend
+	router.Static("/assets", filepath.Join(frontendDir, "assets"))
+	router.NoRoute(func(c *gin.Context) {
+		c.File(filepath.Join(frontendDir, "index.html"))
+	})
 
 	log.Printf("SecureMailScope Backend Server running on port :%s", port)
 	if err := http.ListenAndServe(":"+port, router); err != nil {

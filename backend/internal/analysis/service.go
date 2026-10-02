@@ -2,8 +2,10 @@ package analysis
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"os/exec"
@@ -35,14 +37,21 @@ type Service struct {
 	riskEngine       *risk.Engine
 	eventSubscribers []func(ProgressEvent)
 	rawSubscribers   []func(string)
+	
+	aiRouter         *AIRouter
+	aiQueue          *AIQueue
 }
 
 func NewService(repo *storage.Repository, tsharkPath string) *Service {
-	return &Service{
+	s := &Service{
 		repo:            repo,
 		tsharkInspector: tlsinspect.NewTSharkInspector(tsharkPath, 60*time.Second),
 		riskEngine:      risk.NewEngine(risk.DefaultPolicy()),
 	}
+	s.aiRouter = NewAIRouter()
+	s.aiQueue = NewAIQueue(s.aiRouter, s.repo, s.broadcastRawWSEvent)
+	s.aiQueue.Start()
+	return s
 }
 
 func (s *Service) SubscribeEvents(fn func(ProgressEvent)) {
@@ -69,6 +78,10 @@ func (s *Service) broadcastRawWSEvent(msg string) {
 	for _, sub := range s.rawSubscribers {
 		sub(msg)
 	}
+}
+
+func (s *Service) GetAIRouter() *AIRouter {
+	return s.aiRouter
 }
 
 func (s *Service) CreateAnalysis(pcapPath string) (*models.Analysis, error) {
@@ -357,6 +370,11 @@ func (s *Service) ExecutePipeline(id string) error {
         totalRiskScore += maxScore
         
         _ = s.repo.SaveSession(&parsedSessions[i])
+        
+        // Enqueue session for AI assessment if active provider exists
+        if s.aiRouter.GetActiveProvider() != nil {
+            s.aiQueue.Enqueue(&parsedSessions[i])
+        }
     }
 
 
@@ -371,6 +389,25 @@ func (s *Service) ExecutePipeline(id string) error {
 
 	_ = s.repo.UpdateAnalysisAggregate(id, models.StatusCompleted, overallScore, fsPct, severityBreakdown)
 	s.emitEvent(id, models.StatusCompleted, 100, fmt.Sprintf("Completed analysis of %s", filepath.Base(analysis.PCAPPath)))
+
+    // Run Global AI Assessment asynchronously
+    go func() {
+        if s.aiRouter.GetActiveProvider() != nil {
+            ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+            defer cancel()
+            
+            updatedAnalysis, _ := s.repo.GetAnalysis(id)
+            if updatedAnalysis != nil {
+                globalAssessment, err := s.aiRouter.GetActiveProvider().GenerateGlobalAssessment(ctx, updatedAnalysis, parsedSessions)
+                if err == nil {
+                    _ = s.repo.UpdateGlobalAIAssessment(id, globalAssessment)
+                    s.broadcastRawWSEvent(fmt.Sprintf(`{"event": "global_ai_assessment_complete", "analysis_id": "%s"}`, id))
+                } else {
+                    log.Printf("Failed to generate global AI assessment for %s: %v", id, err)
+                }
+            }
+        }
+    }()
 
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/securemailscope/backend/internal/models"
+	"github.com/securemailscope/backend/internal/session"
 )
 
 func TestDetectorSMTP(t *testing.T) {
@@ -37,11 +38,20 @@ func TestDetectorPOP3(t *testing.T) {
 }
 
 func TestStartTLSStateSMTP(t *testing.T) {
-	analyzer := NewStartTLSAnalyzer()
-	serverResp := []byte("220 mail.test ESMTP\r\n250-STARTTLS\r\n220 Go Ahead\r\n")
-	clientCmd := []byte("EHLO test\r\nSTARTTLS\r\n\x16\x03\x01\x00\x05\x01")
+	analyzer := NewTimelineAnalyzer()
+	
+	stream := &session.ReassembledStream{
+		Chunks: []session.PayloadChunk{
+			{IsClient: false, Data: []byte("220 mail.test ESMTP\r\n250-STARTTLS\r\n")},
+			{IsClient: true, Data: []byte("EHLO test\r\n")},
+			{IsClient: false, Data: []byte("220 Go Ahead\r\n")},
+			{IsClient: true, Data: []byte("STARTTLS\r\n")},
+			{IsClient: false, Data: []byte("220 Ready to start TLS\r\n")},
+			{IsClient: true, Data: []byte("\x16\x03\x01\x00\x05\x01")},
+		},
+	}
 
-	info := analyzer.Analyze(models.ProtocolSMTP, clientCmd, serverResp)
+	_, info := analyzer.Analyze(models.ProtocolSMTP, stream)
 
 	if !info.Supported {
 		t.Errorf("Expected STARTTLS supported = true")

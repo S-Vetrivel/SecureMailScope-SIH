@@ -1,0 +1,47 @@
+version: "3.8"
+
+services:
+  securemailscope:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: securemailscope
+    network_mode: "host"
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    environment:
+      - PORT=6000
+      - DB_PATH=/data/database/securemailscope.db
+      - UPLOAD_DIR=/data/uploads
+      - FRONTEND_DIR=/app/dashboard/dist
+      - CAPTURE_INTERFACE=${CAPTURE_INTERFACE:-}
+      - CAPTURE_CHUNK_SECONDS=${CAPTURE_CHUNK_SECONDS:-10}
+      - CAPTURE_FILTER=${CAPTURE_FILTER:-}
+      - ANALYSIS_WORKERS=${ANALYSIS_WORKERS:-2}
+      - AI_REMOTE_ENABLED=${AI_REMOTE_ENABLED:-true}
+      - AI_REMOTE_URL=${AI_REMOTE_URL:-http://100.x.x.x:11434}
+      - AI_REMOTE_MODEL=${AI_REMOTE_MODEL:-qwen2.5:0.5b}
+      - AI_LOCAL_ENABLED=${AI_LOCAL_ENABLED:-true}
+      - AI_LOCAL_URL=${AI_LOCAL_URL:-http://127.0.0.1:11434}
+      - AI_LOCAL_MODEL=${AI_LOCAL_MODEL:-qwen2.5:0.5b}
+      - AI_WORKERS=${AI_WORKERS:-2}
+      - AI_QUEUE_SIZE=${AI_QUEUE_SIZE:-100}
+      - TSHARK_PATH=/usr/bin/tshark
+    volumes:
+      - securemailscope-data:/data
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    network_mode: "host"
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+    profiles:
+      - ai
+
+volumes:
+  securemailscope-data:
+  ollama-data:

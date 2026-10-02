@@ -1,0 +1,28 @@
+[GIN-debug] [WARNING] Creating an Engine instance with the Logger and Recovery middleware already attached.
+
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] GET    /api/v1/health            --> github.com/securemailscope/backend/internal/api.(*Server).HealthCheck-fm (4 handlers)
+[GIN-debug] POST   /api/v1/pcaps             --> github.com/securemailscope/backend/internal/api.(*Server).UploadPCAP-fm (4 handlers)
+[GIN-debug] POST   /api/v1/analyses          --> github.com/securemailscope/backend/internal/api.(*Server).CreateAnalysis-fm (4 handlers)
+[GIN-debug] GET    /api/v1/analyses          --> github.com/securemailscope/backend/internal/api.(*Server).ListAnalyses-fm (4 handlers)
+[GIN-debug] GET    /api/v1/analyses/:id      --> github.com/securemailscope/backend/internal/api.(*Server).GetAnalysis-fm (4 handlers)
+[GIN-debug] POST   /api/v1/analyses/:id/start --> github.com/securemailscope/backend/internal/api.(*Server).StartAnalysis-fm (4 handlers)
+[GIN-debug] GET    /api/v1/analyses/:id/sessions --> github.com/securemailscope/backend/internal/api.(*Server).GetAnalysisSessions-fm (4 handlers)
+[GIN-debug] GET    /api/v1/sessions/:id      --> github.com/securemailscope/backend/internal/api.(*Server).GetSessionDetail-fm (4 handlers)
+[GIN-debug] GET    /api/v1/analyses/:id/findings --> github.com/securemailscope/backend/internal/api.(*Server).GetAnalysisFindings-fm (4 handlers)
+[GIN-debug] GET    /api/v1/findings/:id      --> github.com/securemailscope/backend/internal/api.(*Server).GetFindingDetail-fm (4 handlers)
+[GIN-debug] GET    /api/v1/analyses/:id/summary --> github.com/securemailscope/backend/internal/api.(*Server).GetAnalysisSummary-fm (4 handlers)
+[GIN-debug] GET    /api/v1/analyses/:id/report --> github.com/securemailscope/backend/internal/api.(*Server).GetAnalysisReport-fm (4 handlers)
+[GIN-debug] GET    /api/v1/summary           --> github.com/securemailscope/backend/internal/api.(*Server).GetDashboardSummary-fm (4 handlers)
+[GIN-debug] GET    /api/v1/analyses/:id/events --> github.com/securemailscope/backend/internal/api.(*Server).WebSocketEvents-fm (4 handlers)
+[GIN-debug] GET    /api/v1/capture/status    --> github.com/securemailscope/backend/internal/api.(*Server).GetCaptureStatus-fm (4 handlers)
+[GIN-debug] POST   /api/v1/capture/start     --> github.com/securemailscope/backend/internal/api.(*Server).StartCapture-fm (4 handlers)
+[GIN-debug] POST   /api/v1/capture/stop      --> github.com/securemailscope/backend/internal/api.(*Server).StopCapture-fm (4 handlers)
+[GIN-debug] GET    /api/v1/capture/interfaces --> github.com/securemailscope/backend/internal/api.(*Server).GetCaptureInterfaces-fm (4 handlers)
+[GIN-debug] GET    /api/v1/capture/stats     --> github.com/securemailscope/backend/internal/api.(*Server).GetCaptureStats-fm (4 handlers)
+[GIN-debug] POST   /api/v1/capture/filter    --> github.com/securemailscope/backend/internal/api.(*Server).SetCaptureFilter-fm (4 handlers)
+2026/10/02 12:31:19 SecureMailScope Backend Server running on port :6000
+[GIN] 2026/10/02 - 12:31:22 | 200 |     418.077µs |             ::1 | GET      "/api/v1/capture/interfaces"
