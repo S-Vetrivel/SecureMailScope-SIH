@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Sidebar from "../components/Sidebar";
 import { useParams } from "react-router-dom";
 import {
@@ -14,6 +14,7 @@ import {
   Wrench,
   Clock,
   Terminal,
+  RefreshCw,
 } from "lucide-react";
 import {
   BarChart,
@@ -28,7 +29,7 @@ import {
   PolarAngleAxis,
   Radar,
 } from "recharts";
-import { fetchAnalysis, fetchAnalysisSessions, getReportURL } from "../lib/api";
+import { fetchAnalysis, fetchAnalysisSessions, getReportURL, startAnalysis } from "../lib/api";
 
 const SEV_COLORS = {
   CRITICAL: "#ef4444",
@@ -54,15 +55,15 @@ export default function AnalysisDetailPage() {
   const [activeTab, setActiveTab] = useState("sessions");
   const [globalAIAssessment, setGlobalAIAssessment] = useState("");
   const [isStreamingAI, setIsStreamingAI] = useState(false);
+  const [isReanalysing, setIsReanalysing] = useState(false);
+  const timeoutIdRef = useRef(null);
 
-  useEffect(() => {
-    let timeoutId;
-    const loadData = () => {
-      fetchAnalysis(id)
+  const loadData = () => {
+    fetchAnalysis(id)
         .then((d) => {
           setData(d);
           if (d && d.status !== "COMPLETED" && d.status !== "FAILED") {
-            timeoutId = setTimeout(loadData, 1000);
+            timeoutIdRef.current = setTimeout(loadData, 1000);
           } else {
             // Once completed, fetch the sessions which will now have findings
             fetchAnalysisSessions(id)
@@ -74,8 +75,9 @@ export default function AnalysisDetailPage() {
           }
         })
         .catch(() => {});
-    };
+  };
 
+  useEffect(() => {
     loadData();
 
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -93,6 +95,10 @@ export default function AnalysisDetailPage() {
           setGlobalAIAssessment((prev) => prev + msg.chunk);
         } else if (msg.event === "ai_stream_end") {
           setIsStreamingAI(false);
+        } else if (msg.event === "global_ai_assessment_complete") {
+          loadData();
+          setIsStreamingAI(false);
+          setActiveTab("ai_insights");
         }
       } catch (e) {
         // regular progress event
@@ -100,7 +106,7 @@ export default function AnalysisDetailPage() {
     };
 
     return () => {
-      if (timeoutId) clearTimeout(timeoutId);
+      if (timeoutIdRef.current) clearTimeout(timeoutIdRef.current);
       ws.close();
     };
   }, [id]);
@@ -139,6 +145,23 @@ export default function AnalysisDetailPage() {
     );
   }
 
+  const handleReanalyse = async () => {
+    setIsReanalysing(true);
+    setIsStreamingAI(true);
+    setGlobalAIAssessment("");
+    try {
+      await startAnalysis(id);
+      setTimeout(() => {
+        loadData();
+        setIsReanalysing(false);
+      }, 1000);
+    } catch (error) {
+      console.error("Failed to reanalyse", error);
+      setIsReanalysing(false);
+      setIsStreamingAI(false);
+    }
+  };
+
   return (
     <div className="app-layout">
       <Sidebar />
@@ -151,6 +174,15 @@ export default function AnalysisDetailPage() {
             </p>
           </div>
           <div className="header-actions">
+            <button
+              onClick={handleReanalyse}
+              disabled={isReanalysing}
+              className="btn btn-primary"
+              style={{ fontSize: 13, display: "flex", gap: "6px", alignItems: "center" }}
+            >
+              <RefreshCw size={14} className={isReanalysing ? "animate-spin" : ""} />
+              {isReanalysing ? "Reanalysing..." : "Reanalyse AI"}
+            </button>
             <a
               href={getReportURL(id, "json")}
               className="btn btn-secondary"

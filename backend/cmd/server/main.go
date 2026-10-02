@@ -14,7 +14,9 @@ import (
 )
 
 func main() {
-	_ = godotenv.Load("../.env", "../.env.example")
+	if err := godotenv.Load("../.env"); err != nil {
+		_ = godotenv.Load("../.env.example")
+	}
 	
 	dbPath := os.Getenv("DB_PATH")
 	if dbPath == "" {
