@@ -51,6 +51,11 @@ func (r *PCAPReader) ReadPackets(onPacket func(pkt PacketMetadata) error) (int, 
 	var packetSource *gopacket.PacketSource
 	var linkType layers.LinkType
 
+	type packetReader interface {
+		ReadPacketData() (data []byte, ci gopacket.CaptureInfo, err error)
+	}
+	var pktReader packetReader
+
 	if magic[0] == 0x0a && magic[1] == 0x0d && magic[2] == 0x0d && magic[3] == 0x0a {
 		// PCAPNG format
 		ngReader, err := pcapgo.NewNgReader(f, pcapgo.DefaultNgReaderOptions)
@@ -58,6 +63,7 @@ func (r *PCAPReader) ReadPackets(onPacket func(pkt PacketMetadata) error) (int, 
 			return 0, fmt.Errorf("failed to create pcapgo ng reader for %s: %w", r.Path, err)
 		}
 		linkType = ngReader.LinkType()
+		pktReader = ngReader
 		log.Printf("[READER] %s: PCAPNG, LinkType=%v (%d)", r.Path, linkType, int(linkType))
 		packetSource = gopacket.NewPacketSource(ngReader, linkType)
 	} else {
@@ -67,6 +73,7 @@ func (r *PCAPReader) ReadPackets(onPacket func(pkt PacketMetadata) error) (int, 
 			return 0, fmt.Errorf("failed to create pcapgo reader for %s: %w", r.Path, err)
 		}
 		linkType = rdr.LinkType()
+		pktReader = rdr
 		log.Printf("[READER] %s: PCAP, LinkType=%v (%d)", r.Path, linkType, int(linkType))
 		packetSource = gopacket.NewPacketSource(rdr, linkType)
 	}
@@ -80,7 +87,54 @@ func (r *PCAPReader) ReadPackets(onPacket func(pkt PacketMetadata) error) (int, 
 	packetCount := 0
 	tcpCount := 0
 
-	for packet := range packetSource.Packets() {
+	var getNextPacket func() (gopacket.Packet, error)
+
+	if int(linkType) == 20 {
+		// SLL2 linktype (276) is truncated to 20 in gopacket v1.1.19 due to uint8 overflow
+		getNextPacket = func() (gopacket.Packet, error) {
+			data, ci, err := pktReader.ReadPacketData()
+			if err != nil {
+				return nil, err
+			}
+			if len(data) >= 20 {
+				// SLL2 Header is 20 bytes. Protocol is first 2 bytes.
+				protocolType := uint16(data[0])<<8 | uint16(data[1])
+				payload := data[20:]
+				var packet gopacket.Packet
+				if protocolType == 0x0800 {
+					packet = gopacket.NewPacket(payload, layers.LayerTypeIPv4, gopacket.Default)
+				} else if protocolType == 0x86dd {
+					packet = gopacket.NewPacket(payload, layers.LayerTypeIPv6, gopacket.Default)
+				}
+				if packet != nil {
+					packet.Metadata().Timestamp = ci.Timestamp
+					packet.Metadata().Length = ci.Length - 20
+					packet.Metadata().CaptureLength = ci.CaptureLength - 20
+					return packet, nil
+				}
+			}
+			packet := gopacket.NewPacket(data, linkType, gopacket.Default)
+			packet.Metadata().Timestamp = ci.Timestamp
+			packet.Metadata().Length = ci.Length
+			packet.Metadata().CaptureLength = ci.CaptureLength
+			return packet, nil
+		}
+	} else {
+		pktChan := packetSource.Packets()
+		getNextPacket = func() (gopacket.Packet, error) {
+			packet, ok := <-pktChan
+			if !ok {
+				return nil, fmt.Errorf("EOF")
+			}
+			return packet, nil
+		}
+	}
+
+	for {
+		packet, err := getNextPacket()
+		if err != nil {
+			break
+		}
 		packetCount++
 		meta := PacketMetadata{
 			Timestamp: packet.Metadata().Timestamp,
