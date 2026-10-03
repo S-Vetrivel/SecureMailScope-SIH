@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -280,10 +281,13 @@ func (s *Server) ViewPackets(c *gin.Context) {
 	// Use tshark to extract packet summaries
 	// tshark -r pcap -T ek (or -T json) might be too heavy. 
 	// Let's use standard output or json.
-	cmd := exec.Command("tshark", "-r", analysis.PCAPPath, "-T", "fields", "-E", "separator=|", "-e", "frame.number", "-e", "frame.time_epoch", "-e", "ip.src", "-e", "ip.dst", "-e", "frame.protocols", "-e", "frame.len", "-e", "col.Info", "-c", "500")
+	cmd := exec.Command("tshark", "-r", analysis.PCAPPath, "-T", "fields", "-E", "separator=|", "-e", "frame.number", "-e", "frame.time_epoch", "-e", "ip.src", "-e", "ip.dst", "-e", "frame.protocols", "-e", "frame.len", "-e", "_ws.col.info", "-c", "500")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read packets"})
+		fmt.Printf("tshark error: %v, stderr: %s\n", err, stderr.String())
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to read packets: %s", stderr.String())})
 		return
 	}
 
@@ -307,7 +311,10 @@ func (s *Server) ViewPackets(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"packets": packets})
+	c.JSON(http.StatusOK, gin.H{
+		"packets": packets,
+		"total":   len(packets),
+	})
 }
 
 func (s *Server) GetPacketDetail(c *gin.Context) {
@@ -325,9 +332,12 @@ func (s *Server) GetPacketDetail(c *gin.Context) {
 	}
 
 	cmd := exec.Command("tshark", "-r", analysis.PCAPPath, "-Y", fmt.Sprintf("frame.number==%s", num), "-V")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read packet details"})
+		fmt.Printf("tshark error: %v, stderr: %s\n", err, stderr.String())
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to read packet details: %s", stderr.String())})
 		return
 	}
 

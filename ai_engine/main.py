@@ -252,6 +252,14 @@ def generate_session_assessment(row: dict, orig_session: dict, is_anomalous: boo
 
     # Prepare evidence for Ollama LLM in Go Backend
     evidence = {
+        "verified_fields": {
+            "protocol": protocol,
+            "STARTTLS": "accepted" if (has_starttls and is_encrypted) else ("requested" if has_starttls else "not used"),
+            "TLS_version": tls_version,
+            "cipher": cipher,
+            "key_exchange": orig_session.get("tls", {}).get("key_exchange_group", "Unknown"),
+            "PFS": has_fs
+        },
         "session_context": {
             "protocol": protocol,
             "is_encrypted": is_encrypted,

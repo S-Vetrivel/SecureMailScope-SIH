@@ -128,8 +128,7 @@ func (e *Engine) Assess(session models.EmailSession) []models.Finding {
 		// Weak Ciphers / Non-AEAD
 		if session.TLS.CipherSuite != "" && session.TLS.CipherSuite != "UNKNOWN" {
 			cinfo := ClassifyCipher(session.TLS.CipherSuite)
-			
-			hasSufficientEvidence := session.TLS.HandshakeCompleted || session.TLS.CertificateSeen || session.TLS.AppDataObserved
+			hasSufficientEvidence := session.TLS.ServerHelloSeen
 
 			if hasSufficientEvidence && cinfo.Type != CipherUnknown {
 				if cinfo.IsWeak {

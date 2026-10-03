@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -188,36 +189,48 @@ func (t *TSharkInspector) parseOutput(output []byte) ([]models.TLSInfo, error) {
 				result.AppDataObserved = true
 			}
 		}
-		// TLS version: prefer supported_version extension (TLS 1.3) > handshake version > record version
-		if len(layers.TLSSupportedVersion) > 0 && result.TLSVersion == "" {
-			result.TLSVersion = normalizeTLSVersion(layers.TLSSupportedVersion[0])
-		}
-		if len(layers.TLSHandshakeVersion) > 0 && result.TLSVersion == "" {
-			v := normalizeTLSVersion(layers.TLSHandshakeVersion[0])
-			if v != "" {
-				result.TLSVersion = v
+		// Extract negotiated parameters strictly from ServerHello
+		if isServerHello {
+			if len(layers.TLSSupportedVersion) > 0 {
+				v := layers.TLSSupportedVersion[0]
+				if !isGrease(v) {
+					result.TLSVersion = normalizeTLSVersion(v)
+				}
+			} else if len(layers.TLSHandshakeVersion) > 0 {
+				v := layers.TLSHandshakeVersion[0]
+				if !isGrease(v) {
+					result.TLSVersion = normalizeTLSVersion(v)
+				}
+			}
+			if len(layers.TLSCipherSuite) > 0 {
+				v := layers.TLSCipherSuite[0]
+				if !isGrease(v) {
+					result.Cipher = formatCipherSuite(v)
+				}
+			}
+			if len(layers.TLSKeyShareGroup) > 0 {
+				v := layers.TLSKeyShareGroup[0]
+				if !isGrease(v) {
+					result.KeyExchangeGrp = formatKeyExchangeGroup(v)
+				}
 			}
 		}
+
+		// Fallback for TLS version if ServerHello isn't seen yet or doesn't have it
 		if result.TLSVersion == "" && len(layers.TLSRecordVersion) > 0 {
-			result.TLSVersion = normalizeTLSVersion(layers.TLSRecordVersion[0])
+			v := layers.TLSRecordVersion[0]
+			if !isGrease(v) {
+				result.TLSVersion = normalizeTLSVersion(v)
+			}
 		}
 
-		// Cipher suite MUST ONLY be extracted from ServerHello
-		if isServerHello && len(layers.TLSCipherSuite) > 0 && result.Cipher == "" {
-			result.Cipher = formatCipherSuite(layers.TLSCipherSuite[0])
-		}
-
-		// SNI
+		// SNI and ALPN usually come from ClientHello, but ALPN can be in ServerHello
 		if len(layers.TLSServerName) > 0 && result.ServerName == "" {
 			result.ServerName = layers.TLSServerName[0]
 		}
 		
 		if len(layers.TLSALPN) > 0 && result.ALPN == "" {
 			result.ALPN = layers.TLSALPN[0]
-		}
-		
-		if len(layers.TLSKeyShareGroup) > 0 && result.KeyExchangeGrp == "" {
-			result.KeyExchangeGrp = layers.TLSKeyShareGroup[0]
 		}
 		
 		if len(layers.TLSSigHashAlg) > 0 && result.SigAlg == "" {
@@ -327,9 +340,13 @@ func formatCipherSuite(cipherHex string) string {
 	}
 }
 
-func AssessForwardSecrecy(tlsVersion, cipher string) models.ForwardSecrecyStatus {
+func AssessForwardSecrecy(tlsVersion, cipher, keyExchangeGrp string) models.ForwardSecrecyStatus {
 	if tlsVersion == "TLS 1.3" {
 		// TLS 1.3 always uses ephemeral key exchange
+		return models.FSYes
+	}
+	// If the server explicitly selected a key exchange group (e.g. X25519) in ServerHello, it's PFS
+	if keyExchangeGrp != "" && keyExchangeGrp != "None" {
 		return models.FSYes
 	}
 	if cipher == "" {
@@ -344,4 +361,41 @@ func AssessForwardSecrecy(tlsVersion, cipher string) models.ForwardSecrecyStatus
 		return models.FSNo
 	}
 	return models.FSUnknown
+}
+
+func isGrease(val string) bool {
+	if val == "" {
+		return false
+	}
+	var num int64
+	var err error
+	if strings.HasPrefix(strings.ToLower(val), "0x") {
+		num, err = strconv.ParseInt(val[2:], 16, 64)
+	} else {
+		num, err = strconv.ParseInt(val, 10, 64)
+	}
+	if err != nil || num == 0 {
+		return false
+	}
+	// GREASE values are of the form 0x?A?A, where both bytes are equal and end in A.
+	return (num&0x0F0F) == 0x0A0A && ((num >> 8) == (num & 0xFF))
+}
+
+func formatKeyExchangeGroup(group string) string {
+	if group == "" {
+		return ""
+	}
+	lower := strings.ToLower(group)
+	switch lower {
+	case "0x001d", "29":
+		return "X25519"
+	case "0x0017", "23":
+		return "secp256r1"
+	case "0x0018", "24":
+		return "secp384r1"
+	case "0x001e", "30":
+		return "X448"
+	default:
+		return group
+	}
 }

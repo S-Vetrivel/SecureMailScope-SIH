@@ -89,7 +89,7 @@ func (s *Service) CreateAnalysis(pcapPath string) (*models.Analysis, error) {
 	id := fmt.Sprintf("analysis-%s", uuid.New().String()[:8])
 	
 	// Create forensic directory
-	analysisDir := filepath.Join("data", "analyses", id)
+	analysisDir := filepath.Join("/data", "analyses", id)
 	if err := os.MkdirAll(analysisDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create analysis directory: %v", err)
 	}
@@ -269,7 +269,7 @@ func (s *Service) ExecutePipeline(id string) error {
 
 		if tlsInfo != nil {
 			emailSession.TLS = tlsInfo
-			emailSession.ForwardSecrecy = tlsinspect.AssessForwardSecrecy(tlsInfo.Version, tlsInfo.CipherSuite)
+			emailSession.ForwardSecrecy = tlsinspect.AssessForwardSecrecy(tlsInfo.Version, tlsInfo.CipherSuite, tlsInfo.KeyExchangeGroup)
 		} else if starttlsInfo.TLSEstablished {
 			// TLS was established but TShark found no specific cipher — mark as incomplete
 			emailSession.TLS = &models.TLSInfo{

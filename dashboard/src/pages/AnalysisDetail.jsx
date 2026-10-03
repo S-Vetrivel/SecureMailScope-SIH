@@ -57,6 +57,7 @@ export default function AnalysisDetailPage() {
   const [isStreamingAI, setIsStreamingAI] = useState(false);
   const [isReanalysing, setIsReanalysing] = useState(false);
   const [packets, setPackets] = useState([]);
+  const [packetsError, setPacketsError] = useState(null);
   const [loadingPackets, setLoadingPackets] = useState(false);
   const [selectedPacket, setSelectedPacket] = useState(null);
   const [packetDetail, setPacketDetail] = useState("");
@@ -117,17 +118,26 @@ export default function AnalysisDetailPage() {
   }, [id]);
 
   useEffect(() => {
-    if (activeTab === "packets" && packets.length === 0) {
+    if (activeTab === "packets" && packets.length === 0 && !packetsError) {
       setLoadingPackets(true);
       fetch(`/api/v1/analyses/${id}/packets`)
-        .then((res) => res.json())
+        .then(async (res) => {
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.error || `HTTP ${res.status}`);
+          }
+          return res.json();
+        })
         .then((data) => {
           setPackets(data.packets || []);
           setLoadingPackets(false);
         })
-        .catch(() => setLoadingPackets(false));
+        .catch((err) => {
+          setPacketsError(err.message);
+          setLoadingPackets(false);
+        });
     }
-  }, [activeTab, id, packets.length]);
+  }, [activeTab, id, packets.length, packetsError]);
 
   const loadPacketDetail = (packetNum) => {
     setSelectedPacket(packetNum);
@@ -863,9 +873,13 @@ export default function AnalysisDetailPage() {
                     <div className="loading-shimmer" style={{ width: "100%", height: 32, borderRadius: 4 }}></div>
                     <div className="loading-shimmer" style={{ width: "100%", height: 32, borderRadius: 4 }}></div>
                   </div>
+                ) : packetsError ? (
+                  <div style={{ padding: 40, textAlign: "center", color: "var(--danger-color)" }}>
+                    Failed to load packets: {packetsError}
+                  </div>
                 ) : packets.length === 0 ? (
                   <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
-                    No packets found or failed to load.
+                    No packets found in this PCAP.
                   </div>
                 ) : (
                   <>

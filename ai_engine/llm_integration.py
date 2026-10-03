@@ -23,6 +23,16 @@ Here are the exact facts extracted from the PCAP traffic:
 
 Analyze the security posture of this session based strictly on the provided evidence. 
 Do NOT hallucinate or invent details that are not in the evidence (e.g., do not claim a protocol is used if the timeline shows otherwise). 
+The AI MUST NOT say:
+- TLS 1.2 is the latest/strong version
+- TLS 1.2 is an expired key exchange algorithm
+- ENHANCEDSTATUSCODES is a TLS vulnerability
+- reverse tunnel attack
+- EAP-TLS requirement
+- malware
+- data exposure
+unless actual evidence in the PCAP supports those claims.
+
 Respond ONLY with a valid JSON object matching this schema exactly (no markdown formatting, no backticks, just raw JSON):
 {{
   "executive_interpretation": "A 2-3 sentence summary of the session's overall security posture.",
@@ -78,6 +88,16 @@ Provide a comprehensive, executive-level AI security assessment of this entire P
 Highlight the overall security posture, any critical findings, and justify the risk score.
 Write in a professional, clear markdown format.
 Do NOT hallucinate or invent details that are not in the provided evidence. Base your conclusions strictly on the facts presented.
+
+The AI MUST NOT say:
+- TLS 1.2 is the latest/strong version
+- TLS 1.2 is an expired key exchange algorithm
+- ENHANCEDSTATUSCODES is a TLS vulnerability
+- reverse tunnel attack
+- EAP-TLS requirement
+- malware
+- data exposure
+unless actual evidence in the PCAP supports those claims.
 """
     model = get_ollama_model()
     url = "http://localhost:11434/api/generate"
