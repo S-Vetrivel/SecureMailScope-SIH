@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -19,14 +20,36 @@ type AIProvider interface {
 }
 
 type OllamaAssessmentResult struct {
-	Summary                string   `json:"summary"`
-	SecurityInterpretation string   `json:"security_interpretation"`
-	RiskExplanation        string   `json:"risk_explanation"`
-	ObservedStrengths      []string `json:"observed_strengths"`
-	ObservedWeaknesses     []string `json:"observed_weaknesses"`
-	EvidenceInterpretation []string `json:"evidence_interpretation"`
-	RecommendedActions     []string `json:"recommended_actions"`
-	Confidence             float64  `json:"confidence"`
+	Summary                string      `json:"summary"`
+	SecurityInterpretation string      `json:"security_interpretation"`
+	RiskExplanation        string      `json:"risk_explanation"`
+	ObservedStrengths      interface{} `json:"observed_strengths"`
+	ObservedWeaknesses     interface{} `json:"observed_weaknesses"`
+	EvidenceInterpretation interface{} `json:"evidence_interpretation"`
+	RecommendedActions     interface{} `json:"recommended_actions"`
+	Confidence             float64     `json:"confidence"`
+}
+
+func parseStringArray(val interface{}) []string {
+	if val == nil {
+		return []string{}
+	}
+	switch v := val.(type) {
+	case string:
+		return []string{v}
+	case []interface{}:
+		var res []string
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				res = append(res, s)
+			}
+		}
+		return res
+	default:
+		// If it's an object or something else, stringify it
+		b, _ := json.Marshal(v)
+		return []string{string(b)}
+	}
 }
 
 type OllamaProvider struct {
@@ -204,15 +227,27 @@ func NewAIRouter() *AIRouter {
 	remoteEnabled := os.Getenv("AI_REMOTE_ENABLED") == "true"
 	localEnabled := os.Getenv("AI_LOCAL_ENABLED") == "true"
 	
+	parseTimeout := func(envKey string, defaultSecs int) time.Duration {
+		val := os.Getenv(envKey)
+		if val == "" {
+			return time.Duration(defaultSecs) * time.Second
+		}
+		ms, err := strconv.Atoi(val)
+		if err != nil || ms <= 0 {
+			return time.Duration(defaultSecs) * time.Second
+		}
+		return time.Duration(ms) * time.Millisecond
+	}
+
 	var remote *OllamaProvider
 	if remoteEnabled {
-		remoteTimeout := 5 * time.Second
+		remoteTimeout := parseTimeout("AI_REMOTE_TIMEOUT_MS", 60)
 		remote = NewOllamaProvider("remote", os.Getenv("AI_REMOTE_URL"), os.Getenv("AI_REMOTE_MODEL"), remoteTimeout)
 	}
 	
 	var local *OllamaProvider
 	if localEnabled {
-		localTimeout := 30 * time.Second
+		localTimeout := parseTimeout("AI_LOCAL_TIMEOUT_MS", 60)
 		local = NewOllamaProvider("local", os.Getenv("AI_LOCAL_URL"), os.Getenv("AI_LOCAL_MODEL"), localTimeout)
 	}
 	

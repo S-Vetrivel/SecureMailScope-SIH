@@ -89,7 +89,7 @@ func (q *AIQueue) processSession(session *models.EmailSession) {
 		ExecutiveInterpretation: result.Summary + "\n" + result.SecurityInterpretation,
 		AIReasoning:             result.RiskExplanation,
 		Priority:                "INFO",
-		RecommendedActions:      result.RecommendedActions,
+		RecommendedActions:      parseStringArray(result.RecommendedActions),
 	}
 	if result.Confidence > 0 {
 		mappedResult.Priority = fmt.Sprintf("CONFIDENCE: %.2f", result.Confidence)
