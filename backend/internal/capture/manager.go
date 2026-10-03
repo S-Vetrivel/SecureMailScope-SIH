@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -103,6 +104,10 @@ func (m *LiveCaptureManager) Start(iface string) error {
 
 	if m.status == "ACTIVE" {
 		return fmt.Errorf("capture is already active on %s", m.activeInterface)
+	}
+
+	if iface == "" {
+		iface = "any"
 	}
 
 	m.activeInterface = iface
@@ -281,13 +286,21 @@ func (m *LiveCaptureManager) captureLoop(iface string) {
 
 		// Stat the tmp file first
 		tmpInfo, statErr := os.Stat(tmpPath)
-		if statErr != nil || tmpInfo.Size() <= 24 {
-			log.Printf("[CAPTURE] Chunk %s is empty/missing in tmp (size=%d), skipping", filepath.Base(currentPath), func() int64 {
-				if tmpInfo != nil {
-					return tmpInfo.Size()
-				}
-				return 0
-			}())
+		if statErr != nil || tmpInfo.Size() == 0 {
+			log.Printf("[CAPTURE] tcpdump failed to start or write PCAP header (statErr=%v). Check interface and permissions.", statErr)
+			m.mu.Lock()
+			m.status = "ERROR"
+			m.mu.Unlock()
+			os.Remove(tmpPath)
+			
+			if m.eventEmitter != nil {
+				m.eventEmitter("capture.error", map[string]string{"error": "tcpdump failed to start"})
+			}
+			return
+		}
+		
+		if tmpInfo.Size() <= 24 {
+			log.Printf("[CAPTURE] Chunk %s is empty (size=%d), skipping", filepath.Base(currentPath), tmpInfo.Size())
 			os.Remove(tmpPath)
 			continue
 		}
@@ -301,13 +314,17 @@ func (m *LiveCaptureManager) captureLoop(iface string) {
 
 		info, _ := os.Stat(currentPath)
 
-		// Rough packet count estimate (avg packet ~150 bytes on tailscale)
-		estPackets := int(info.Size() / 150)
-		log.Printf("[CAPTURE] Chunk %s ready: ~%d packets, %d bytes", filepath.Base(currentPath), estPackets, info.Size())
+		// Get exact packet count using tcpdump
+		countCmd := exec.Command("bash", "-c", fmt.Sprintf("/usr/bin/tcpdump -nn -r %s 2>/dev/null | wc -l", currentPath))
+		countOut, _ := countCmd.Output()
+		exactPackets := 0
+		fmt.Sscanf(strings.TrimSpace(string(countOut)), "%d", &exactPackets)
+
+		log.Printf("[CAPTURE] Chunk %s ready: %d packets, %d bytes", filepath.Base(currentPath), exactPackets, info.Size())
 
 		m.mu.Lock()
 		m.bytes += int(info.Size())
-		m.packets += estPackets
+		m.packets += exactPackets
 		m.mu.Unlock()
 
 		if m.eventEmitter != nil {
