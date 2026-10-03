@@ -658,11 +658,19 @@ func generateHTMLReport(analysis *models.Analysis, sessions []models.EmailSessio
 			html += fmt.Sprintf(`<h3>Session %s (%s - %s)</h3><ul>`, sess.ID, sess.SrcIP, sess.DstIP)
 			for _, f := range sess.Findings {
 				sevClass := "severity-" + strings.ToLower(string(f.Severity))
+				confBadge := ""
+				if f.Confidence != "" {
+					confBadge = fmt.Sprintf(`<span style="font-size: 11px; padding: 2px 6px; background: #334155; border-radius: 4px; margin-left: 8px;">%s CONFIDENCE</span>`, f.Confidence)
+				}
+				evText := ""
+				if f.Evidence.Details != "" {
+					evText = fmt.Sprintf(`<br/><span style="color: #cbd5e1; font-size: 13px;"><strong>Evidence:</strong> %s</span>`, f.Evidence.Details)
+				}
 				html += fmt.Sprintf(`<li style="margin-bottom: 12px; padding-left: 20px;">
-					<strong class="%s">[%s] %s</strong><br/>
-					<span style="color: #94a3b8; font-size: 13px;">%s</span><br/>
+					<strong class="%s">[%s] %s</strong>%s<br/>
+					<span style="color: #94a3b8; font-size: 13px;">%s</span>%s<br/>
 					<strong>Remediation:</strong> %s
-				</li>`, sevClass, f.Severity, f.Title, f.Description, f.Recommendation)
+				</li>`, sevClass, f.Severity, f.Title, confBadge, f.Description, evText, f.Recommendation)
 			}
 			html += `</ul>`
 		}
@@ -747,11 +755,18 @@ func generatePDFReport(analysis *models.Analysis, sessions []models.EmailSession
 
 			for _, f := range sess.Findings {
 				pdf.SetFont("Arial", "B", 10)
-				pdf.Cell(40, 6, fmt.Sprintf("[%s] %s", f.Severity, f.Title))
+				titleStr := fmt.Sprintf("[%s] %s", f.Severity, f.Title)
+				if f.Confidence != "" {
+					titleStr += fmt.Sprintf(" (%s CONF)", f.Confidence)
+				}
+				pdf.Cell(40, 6, titleStr)
 				pdf.Ln(6)
 				
 				pdf.SetFont("Arial", "", 10)
 				pdf.MultiCell(0, 5, fmt.Sprintf("Description: %s", f.Description), "", "L", false)
+				if f.Evidence.Details != "" {
+					pdf.MultiCell(0, 5, fmt.Sprintf("Evidence: %s", f.Evidence.Details), "", "L", false)
+				}
 				pdf.MultiCell(0, 5, fmt.Sprintf("Remediation: %s", f.Recommendation), "", "L", false)
 				pdf.Ln(4)
 			}

@@ -236,6 +236,20 @@ export default function AnalysisDetailPage() {
             >
               <FileJson size={14} /> JSON
             </a>
+            <a
+              href={getReportURL(id, "html")}
+              className="btn btn-secondary"
+              style={{ fontSize: 13 }}
+            >
+              <FileText size={14} /> HTML
+            </a>
+            <a
+              href={getReportURL(id, "pdf")}
+              className="btn btn-secondary"
+              style={{ fontSize: 13 }}
+            >
+              <FileText size={14} /> PDF
+            </a>
           </div>
         </header>
 
