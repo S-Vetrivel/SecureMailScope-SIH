@@ -142,15 +142,23 @@ type CertificateInfo struct {
 	Fingerprint        string    `json:"fingerprint,omitempty"`
 }
 
+type FindingEvidence struct {
+	PacketNumbers []int  `json:"packet_numbers"`
+	SessionID     string `json:"session_id"`
+	PCAP          string `json:"pcap"`
+	Details       string `json:"details,omitempty"`
+}
+
 type Finding struct {
-	ID             string   `json:"id"`
-	Title          string   `json:"title"`
-	Severity       Severity `json:"severity"`
-	Category       string   `json:"category"`
-	SessionID      string   `json:"session_id"`
-	Description    string   `json:"description"`
-	Evidence       []string `json:"evidence"`
-	Recommendation string   `json:"recommendation"`
+	ID             string          `json:"id"`
+	Title          string          `json:"title"`
+	Severity       Severity        `json:"severity"`
+	Category       string          `json:"category"`
+	SessionID      string          `json:"session_id"`
+	Description    string          `json:"description"`
+	Confidence     string          `json:"confidence"`
+	Evidence       FindingEvidence `json:"evidence"`
+	Recommendation string          `json:"recommendation"`
 }
 
 type Endpoint struct {

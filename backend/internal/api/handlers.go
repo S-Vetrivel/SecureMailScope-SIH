@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -84,6 +85,10 @@ func (s *Server) RegisterRoutes(r *gin.Engine) {
 
 		v1.GET("/analyses/:id/findings", s.GetAnalysisFindings)
 		v1.GET("/findings/:id", s.GetFindingDetail)
+
+		v1.GET("/analyses/:id/pcap", s.DownloadPCAP)
+		v1.GET("/analyses/:id/packets", s.ViewPackets)
+		v1.GET("/analyses/:id/packets/:num", s.GetPacketDetail)
 
 		v1.GET("/analyses/:id/summary", s.GetAnalysisSummary)
 		v1.GET("/analyses/:id/report", s.GetAnalysisReport)
@@ -240,6 +245,93 @@ func (s *Server) GetFindingDetail(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, finding)
+}
+
+func (s *Server) DownloadPCAP(c *gin.Context) {
+	id := c.Param("id")
+	analysis, err := s.repo.GetAnalysis(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Analysis not found"})
+		return
+	}
+	
+	if _, err := os.Stat(analysis.PCAPPath); os.IsNotExist(err) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PCAP file not found on disk"})
+		return
+	}
+	
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filepath.Base(analysis.PCAPPath)))
+	c.File(analysis.PCAPPath)
+}
+
+func (s *Server) ViewPackets(c *gin.Context) {
+	id := c.Param("id")
+	analysis, err := s.repo.GetAnalysis(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Analysis not found"})
+		return
+	}
+	
+	if _, err := os.Stat(analysis.PCAPPath); os.IsNotExist(err) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PCAP file not found on disk"})
+		return
+	}
+
+	// Use tshark to extract packet summaries
+	// tshark -r pcap -T ek (or -T json) might be too heavy. 
+	// Let's use standard output or json.
+	cmd := exec.Command("tshark", "-r", analysis.PCAPPath, "-T", "fields", "-E", "separator=|", "-e", "frame.number", "-e", "frame.time_epoch", "-e", "ip.src", "-e", "ip.dst", "-e", "frame.protocols", "-e", "frame.len", "-e", "col.Info", "-c", "500")
+	out, err := cmd.Output()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read packets"})
+		return
+	}
+
+	lines := strings.Split(string(out), "\n")
+	var packets []map[string]interface{}
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "|", 7)
+		if len(parts) >= 6 {
+			packets = append(packets, map[string]interface{}{
+				"packet_number": parts[0],
+				"timestamp":     parts[1],
+				"source":        parts[2],
+				"destination":   parts[3],
+				"protocol":      parts[4],
+				"length":        parts[5],
+				"summary":       parts[6],
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"packets": packets})
+}
+
+func (s *Server) GetPacketDetail(c *gin.Context) {
+	id := c.Param("id")
+	num := c.Param("num")
+	analysis, err := s.repo.GetAnalysis(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Analysis not found"})
+		return
+	}
+	
+	if _, err := os.Stat(analysis.PCAPPath); os.IsNotExist(err) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "PCAP file not found on disk"})
+		return
+	}
+
+	cmd := exec.Command("tshark", "-r", analysis.PCAPPath, "-Y", fmt.Sprintf("frame.number==%s", num), "-V")
+	out, err := cmd.Output()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read packet details"})
+		return
+	}
+
+	c.Data(http.StatusOK, "text/plain", out)
 }
 
 func (s *Server) GetAnalysisSummary(c *gin.Context) {

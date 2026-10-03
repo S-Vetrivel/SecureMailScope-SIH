@@ -26,7 +26,7 @@ func ClassifyCipher(name string) CipherInfo {
 		Name:           name,
 		Type:           CipherUnknown,
 		IsAEAD:         false,
-		IsWeak:         true,
+		IsWeak:         false, // UNKNOWN ≠ VULNERABLE
 		KeySize:        0,
 		KeyExchangeAlg: "UNKNOWN",
 		IsPFS:          false,

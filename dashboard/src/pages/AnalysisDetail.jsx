@@ -56,6 +56,11 @@ export default function AnalysisDetailPage() {
   const [globalAIAssessment, setGlobalAIAssessment] = useState("");
   const [isStreamingAI, setIsStreamingAI] = useState(false);
   const [isReanalysing, setIsReanalysing] = useState(false);
+  const [packets, setPackets] = useState([]);
+  const [loadingPackets, setLoadingPackets] = useState(false);
+  const [selectedPacket, setSelectedPacket] = useState(null);
+  const [packetDetail, setPacketDetail] = useState("");
+  const [loadingPacketDetail, setLoadingPacketDetail] = useState(false);
   const timeoutIdRef = useRef(null);
 
   const loadData = () => {
@@ -110,6 +115,32 @@ export default function AnalysisDetailPage() {
       ws.close();
     };
   }, [id]);
+
+  useEffect(() => {
+    if (activeTab === "packets" && packets.length === 0) {
+      setLoadingPackets(true);
+      fetch(`/api/v1/analyses/${id}/packets`)
+        .then((res) => res.json())
+        .then((data) => {
+          setPackets(data.packets || []);
+          setLoadingPackets(false);
+        })
+        .catch(() => setLoadingPackets(false));
+    }
+  }, [activeTab, id, packets.length]);
+
+  const loadPacketDetail = (packetNum) => {
+    setSelectedPacket(packetNum);
+    setPacketDetail("");
+    setLoadingPacketDetail(true);
+    fetch(`/api/v1/analyses/${id}/packets/${packetNum}`)
+      .then((res) => res.text())
+      .then((text) => {
+        setPacketDetail(text);
+        setLoadingPacketDetail(false);
+      })
+      .catch(() => setLoadingPacketDetail(false));
+  };
 
   const toggleExpand = (sessionId) => {
     setExpanded((prev) => ({ ...prev, [sessionId]: !prev[sessionId] }));
@@ -184,25 +215,26 @@ export default function AnalysisDetailPage() {
               {isReanalysing ? "Reanalysing..." : "Reanalyse AI"}
             </button>
             <a
+              href={`/api/v1/analyses/${id}/pcap`}
+              className="btn btn-secondary"
+              style={{ fontSize: 13 }}
+              download
+            >
+              <FileText size={14} /> Download PCAP
+            </a>
+            <button
+              onClick={() => setActiveTab("packets")}
+              className={`btn ${activeTab === "packets" ? "btn-primary" : "btn-secondary"}`}
+              style={{ fontSize: 13 }}
+            >
+              <FileText size={14} /> View Packets
+            </button>
+            <a
               href={getReportURL(id, "json")}
               className="btn btn-secondary"
               style={{ fontSize: 13 }}
             >
               <FileJson size={14} /> JSON
-            </a>
-            <a
-              href={getReportURL(id, "html")}
-              className="btn btn-secondary"
-              style={{ fontSize: 13 }}
-            >
-              <FileText size={14} /> HTML
-            </a>
-            <a
-              href={getReportURL(id, "pdf")}
-              className="btn btn-secondary"
-              style={{ fontSize: 13 }}
-            >
-              <FileText size={14} /> PDF
             </a>
           </div>
         </header>
@@ -401,7 +433,7 @@ export default function AnalysisDetailPage() {
 
           {/* Tabs */}
           <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
-            {["sessions", "findings", "remediation", "ai_insights"].map((tab) => (
+            {["sessions", "findings", "packets", "remediation", "ai_insights"].map((tab) => (
               <button
                 key={tab}
                 className={`btn ${activeTab === tab ? "btn-primary" : "btn-secondary"}`}
@@ -410,9 +442,11 @@ export default function AnalysisDetailPage() {
               >
                 {tab === "sessions" && <Shield size={14} />}
                 {tab === "findings" && <Bug size={14} />}
+                {tab === "packets" && <FileText size={14} />}
                 {tab === "remediation" && <Wrench size={14} />}
                 {tab === "ai_insights" && <span>🤖</span>}
-                <span style={{ textTransform: "capitalize" }}>{tab === "ai_insights" ? "AI Insights" : tab}</span> ({tab === "sessions" ? sessions.length : tab === "findings" ? allFindings.length : tab === "remediation" ? sessions.filter((s) => s.ai_assessment_structured?.recommended_actions?.length || s.remediations?.length).length : tab === "ai_insights" ? (isStreamingAI ? "Streaming..." : "1") : 0})
+                <span style={{ textTransform: "capitalize" }}>{tab === "ai_insights" ? "AI Insights" : tab}</span> 
+                {tab !== "packets" && ` (${tab === "sessions" ? sessions.length : tab === "findings" ? allFindings.length : tab === "remediation" ? sessions.filter((s) => s.ai_assessment_structured?.recommended_actions?.length || s.remediations?.length).length : tab === "ai_insights" ? (isStreamingAI ? "Streaming..." : "1") : 0})`}
               </button>
             ))}
           </div>
@@ -541,17 +575,28 @@ export default function AnalysisDetailPage() {
                               <div key={i} style={{ marginBottom: 12, paddingLeft: 12, borderLeft: `2px solid ${SEV_COLORS[f.severity] || "#6b7280"}` }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                                   <span className={`severity-badge ${(f.severity || "INFO").toLowerCase()}`} style={{ fontSize: 10 }}>{f.severity}</span>
+                                  {f.confidence && (
+                                    <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4, background: "rgba(255,255,255,0.1)", color: "#cbd5e1" }}>
+                                      {f.confidence} CONFIDENCE
+                                    </span>
+                                  )}
                                   <span style={{ fontWeight: 600, fontSize: 13 }}>{f.title}</span>
                                 </div>
                                 <div className="finding-desc" style={{ marginBottom: 6 }}>{f.description}</div>
-                                {f.evidence?.length > 0 && (
+                                {f.evidence ? (
                                   <div style={{ padding: 8, background: "rgba(0,0,0,0.2)", borderRadius: 4, border: "1px solid rgba(255,255,255,0.05)", marginBottom: 6 }}>
                                     <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 4, textTransform: "uppercase" }}>Forensic Evidence</div>
                                     <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, color: "#cbd5e1" }}>
-                                      {f.evidence.map((ev, idx) => <li key={idx}>{ev}</li>)}
+                                      {Array.isArray(f.evidence) ? f.evidence.map((ev, idx) => <li key={idx}>{ev}</li>) : (
+                                        <>
+                                          {f.evidence.details && <li>{f.evidence.details}</li>}
+                                          {f.evidence.packet_numbers?.length > 0 && <li>Packets: {f.evidence.packet_numbers.join(", ")}</li>}
+                                          {f.evidence.pcap && <li>PCAP: {f.evidence.pcap}</li>}
+                                        </>
+                                      )}
                                     </ul>
                                   </div>
-                                )}
+                                ) : null}
                                 {f.recommendation && <div style={{ fontSize: 12, color: "#34d399" }}>💡 {f.recommendation}</div>}
                               </div>
                             ))
@@ -749,6 +794,11 @@ export default function AnalysisDetailPage() {
                   <div key={i} className="finding-item">
                     <div className="finding-header">
                       <span className={`severity-badge ${(f.severity || "INFO").toLowerCase()}`}>{f.severity}</span>
+                      {f.confidence && (
+                        <span style={{ fontSize: 11, padding: "2px 6px", borderRadius: 4, background: "rgba(255,255,255,0.1)", color: "#cbd5e1" }}>
+                          {f.confidence} CONFIDENCE
+                        </span>
+                      )}
                       <span className="finding-title">{f.title}</span>
                       <span className="mono" style={{ fontSize: 11, color: "var(--text-muted)", marginLeft: "auto" }}>
                         {f.id}
@@ -763,16 +813,20 @@ export default function AnalysisDetailPage() {
                       </div>
                     ) : null}
                     
-                    {f.evidence?.length > 0 && (
+                    {f.evidence ? (
                       <div style={{ marginTop: 12, padding: 12, background: "rgba(0,0,0,0.2)", borderRadius: 6, border: "1px solid rgba(255,255,255,0.05)" }}>
                         <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", marginBottom: 6, textTransform: "uppercase" }}>Forensic Evidence</div>
                         <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#e2e8f0" }}>
-                          {f.evidence.map((ev, idx) => (
-                            <li key={idx} style={{ marginBottom: 4 }}>{ev}</li>
-                          ))}
+                          {Array.isArray(f.evidence) ? f.evidence.map((ev, idx) => <li key={idx} style={{ marginBottom: 4 }}>{ev}</li>) : (
+                            <>
+                              {f.evidence.details && <li style={{ marginBottom: 4 }}>{f.evidence.details}</li>}
+                              {f.evidence.packet_numbers?.length > 0 && <li style={{ marginBottom: 4 }}>Packets: {f.evidence.packet_numbers.join(", ")}</li>}
+                              {f.evidence.pcap && <li style={{ marginBottom: 4 }}>PCAP: {f.evidence.pcap}</li>}
+                            </>
+                          )}
                         </ul>
                       </div>
-                    )}
+                    ) : null}
 
                     {f.remediation && (
                       <div style={{ marginTop: 8, fontSize: 13, color: "var(--accent-green)" }}>
@@ -782,6 +836,71 @@ export default function AnalysisDetailPage() {
                   </div>
                 ))
               )}
+            </div>
+          )}
+
+          {/* Packets Tab */}
+          {activeTab === "packets" && (
+            <div className="card">
+              <div style={{ padding: 20 }}>
+                {loadingPackets ? (
+                  <div style={{ padding: 40, display: "flex", flexDirection: "column", gap: 16 }}>
+                    <div className="loading-shimmer" style={{ width: "100%", height: 32, borderRadius: 4 }}></div>
+                    <div className="loading-shimmer" style={{ width: "100%", height: 32, borderRadius: 4 }}></div>
+                    <div className="loading-shimmer" style={{ width: "100%", height: 32, borderRadius: 4 }}></div>
+                  </div>
+                ) : packets.length === 0 ? (
+                  <div style={{ padding: 40, textAlign: "center", color: "var(--text-muted)" }}>
+                    No packets found or failed to load.
+                  </div>
+                ) : (
+                  <>
+                  <div style={{ maxHeight: selectedPacket ? 300 : 600, overflowY: "auto", borderBottom: selectedPacket ? "1px solid var(--border-color)" : "none" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid var(--border-color)", textAlign: "left", color: "var(--text-muted)" }}>
+                        <th style={{ padding: "8px 12px" }}>No.</th>
+                        <th style={{ padding: "8px 12px" }}>Time</th>
+                        <th style={{ padding: "8px 12px" }}>Source</th>
+                        <th style={{ padding: "8px 12px" }}>Destination</th>
+                        <th style={{ padding: "8px 12px" }}>Protocol</th>
+                        <th style={{ padding: "8px 12px" }}>Length</th>
+                        <th style={{ padding: "8px 12px" }}>Info</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {packets.map((pkt, i) => (
+                        <tr key={i} onClick={() => loadPacketDetail(pkt.packet_number)} style={{ borderBottom: "1px solid rgba(255,255,255,0.05)", cursor: "pointer", background: selectedPacket === pkt.packet_number ? "rgba(59, 130, 246, 0.15)" : "transparent" }} onMouseEnter={(e) => { if(selectedPacket !== pkt.packet_number) e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }} onMouseLeave={(e) => { if(selectedPacket !== pkt.packet_number) e.currentTarget.style.background = "transparent"; }}>
+                          <td style={{ padding: "8px 12px", color: "var(--text-muted)" }}>{pkt.packet_number}</td>
+                          <td style={{ padding: "8px 12px", fontFamily: "monospace", color: "#e2e8f0" }}>{pkt.timestamp}</td>
+                          <td style={{ padding: "8px 12px", color: "#38bdf8" }}>{pkt.source}</td>
+                          <td style={{ padding: "8px 12px", color: "#a78bfa" }}>{pkt.destination}</td>
+                          <td style={{ padding: "8px 12px", fontWeight: 600, color: "#60a5fa" }}>{pkt.protocol}</td>
+                          <td style={{ padding: "8px 12px", color: "var(--text-muted)" }}>{pkt.length}</td>
+                          <td style={{ padding: "8px 12px", color: "#cbd5e1" }}>{pkt.summary}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  </div>
+                  {selectedPacket && (
+                    <div style={{ marginTop: 24, borderTop: "1px solid var(--border-color)", paddingTop: 16 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                        <h3 style={{ margin: 0, fontSize: 14, color: "#e2e8f0" }}>Packet {selectedPacket} Details</h3>
+                        <button onClick={() => setSelectedPacket(null)} style={{ background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "4px 8px" }}>Close</button>
+                      </div>
+                      {loadingPacketDetail ? (
+                        <div className="loading-shimmer" style={{ width: "100%", height: 200, borderRadius: 4 }}></div>
+                      ) : (
+                        <pre style={{ background: "#0f172a", padding: 16, borderRadius: 6, color: "#cbd5e1", fontSize: 12, overflowX: "auto", maxHeight: 400 }}>
+                          {packetDetail}
+                        </pre>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+              </div>
             </div>
           )}
 

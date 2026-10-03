@@ -56,7 +56,12 @@ def generate_session_assessment(row: dict, orig_session: dict, is_anomalous: boo
             "category": "TLS_VERSION",
             "session_id": session_id,
             "description": "This session uses TLS 1.2. While considered secure, TLS 1.3 eliminates legacy cipher suites, reduces handshake latency and provides stronger security guarantees.",
-            "evidence": [f"Negotiated Version: {tls_version}", f"Cipher: {cipher}"],
+            "confidence": "HIGH",
+            "evidence": {
+                "session_id": orig_session.get("id", ""),
+                "pcap": "capture.pcap",
+                "details": f"Negotiated Version: {tls_version}, Cipher: {cipher}"
+            },
             "recommendation": "Configure the email server to prefer TLS 1.3 (RFC 8446). TLS 1.2 should be kept only as a fallback for legacy client compatibility."
         })
     elif tls_version in ("TLS 1.1", "TLS 1.0", "SSLv3"):
@@ -68,7 +73,12 @@ def generate_session_assessment(row: dict, orig_session: dict, is_anomalous: boo
             "category": "TLS_VERSION",
             "session_id": session_id,
             "description": f"{tls_version} is a deprecated and cryptographically broken protocol. It is vulnerable to known attacks including POODLE (CVE-2014-3566) and BEAST (CVE-2011-3389).",
-            "evidence": [f"Negotiated Version: {tls_version}", "Protocol blacklisted by RFC 8996"],
+            "confidence": "HIGH",
+            "evidence": {
+                "session_id": orig_session.get("id", ""),
+                "pcap": "capture.pcap",
+                "details": f"Negotiated Version: {tls_version}, Protocol blacklisted by RFC 8996"
+            },
             "recommendation": f"Immediately disable {tls_version} support on the server. Configure TLS_MIN_VERSION=TLS1.2 and preferably TLS1.3."
         })
     else:
@@ -93,7 +103,12 @@ def generate_session_assessment(row: dict, orig_session: dict, is_anomalous: boo
                 "category": "CIPHER_SUITE",
                 "session_id": session_id,
                 "description": "CBC mode cipher suites are susceptible to padding oracle attacks (Lucky13, BEAST) in TLS 1.2 and below. AEAD suites (GCM/ChaCha20) are strongly preferred.",
-                "evidence": [f"Cipher: {cipher}", "CBC mode detected"],
+                "confidence": "HIGH",
+                "evidence": {
+                    "session_id": orig_session.get("id", ""),
+                    "pcap": "capture.pcap",
+                    "details": f"Cipher: {cipher}, CBC mode detected"
+                },
                 "recommendation": "Prefer AEAD cipher suites: TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256. Disable CBC mode suites on the server."
             })
         elif "RC4" in cipher_upper:
@@ -105,7 +120,12 @@ def generate_session_assessment(row: dict, orig_session: dict, is_anomalous: boo
                 "category": "CIPHER_SUITE",
                 "session_id": session_id,
                 "description": "RC4 is a broken stream cipher with numerous statistical biases that allow plaintext recovery. It has been officially prohibited by RFC 7465.",
-                "evidence": [f"Cipher: {cipher}", "RC4 prohibited by RFC 7465"],
+                "confidence": "HIGH",
+                "evidence": {
+                    "session_id": orig_session.get("id", ""),
+                    "pcap": "capture.pcap",
+                    "details": f"Cipher: {cipher}, RC4 prohibited by RFC 7465"
+                },
                 "recommendation": "Immediately disable RC4 on all servers. Use TLS_AES_256_GCM_SHA384 or TLS_CHACHA20_POLY1305_SHA256."
             })
         elif "NULL" in cipher_upper:
@@ -116,7 +136,12 @@ def generate_session_assessment(row: dict, orig_session: dict, is_anomalous: boo
                 "category": "CIPHER_SUITE",
                 "session_id": session_id,
                 "description": "NULL cipher suites provide no encryption whatsoever. All data is transmitted in plaintext even within a TLS connection.",
-                "evidence": [f"Cipher: {cipher}"],
+                "confidence": "HIGH",
+                "evidence": {
+                    "session_id": orig_session.get("id", ""),
+                    "pcap": "capture.pcap",
+                    "details": f"Cipher: {cipher}"
+                },
                 "recommendation": "Disable NULL cipher suites on the server. Enable only strong AEAD ciphers."
             })
 
@@ -132,7 +157,12 @@ def generate_session_assessment(row: dict, orig_session: dict, is_anomalous: boo
             "category": "KEY_EXCHANGE",
             "session_id": session_id,
             "description": "This session does not use an ephemeral key exchange (ECDHE/DHE). If the server private key is ever compromised, an attacker with recorded traffic can decrypt all past sessions.",
-            "evidence": ["Static key exchange detected (RSA key exchange)", f"Cipher: {cipher}"],
+            "confidence": "HIGH",
+            "evidence": {
+                "session_id": orig_session.get("id", ""),
+                "pcap": "capture.pcap",
+                "details": f"Static key exchange detected (RSA key exchange), Cipher: {cipher}"
+            },
             "recommendation": "Configure the server to require ECDHE or DHE key exchange. In TLS 1.3, all cipher suites provide forward secrecy by default."
         })
 
@@ -145,7 +175,12 @@ def generate_session_assessment(row: dict, orig_session: dict, is_anomalous: boo
             "category": "CERTIFICATE",
             "session_id": session_id,
             "description": "The server presented an expired TLS certificate. Clients may refuse connections or proceed unsafely by bypassing certificate validation.",
-            "evidence": ["Certificate expiry date is in the past"],
+            "confidence": "HIGH",
+            "evidence": {
+                "session_id": orig_session.get("id", ""),
+                "pcap": "capture.pcap",
+                "details": "Certificate expiry date is in the past"
+            },
             "recommendation": "Renew the TLS certificate immediately. Use Let's Encrypt with auto-renewal or a certificate management platform."
         })
 
@@ -157,7 +192,12 @@ def generate_session_assessment(row: dict, orig_session: dict, is_anomalous: boo
             "category": "CERTIFICATE",
             "session_id": session_id,
             "description": f"The certificate uses a {cert_key_bits}-bit key, which is below the NIST minimum of 2048 bits for RSA or 256 bits for ECDSA. Such keys can be factored using modern computing resources.",
-            "evidence": [f"Key length: {cert_key_bits} bits", "NIST SP 800-57 minimum: RSA-2048 / ECDSA-256"],
+            "confidence": "HIGH",
+            "evidence": {
+                "session_id": orig_session.get("id", ""),
+                "pcap": "capture.pcap",
+                "details": f"Key length: {cert_key_bits} bits, NIST SP 800-57 minimum: RSA-2048 / ECDSA-256"
+            },
             "recommendation": "Replace the certificate with RSA-4096 or ECDSA-256/384. ECDSA is preferred for performance at equivalent security levels."
         })
 
@@ -169,7 +209,12 @@ def generate_session_assessment(row: dict, orig_session: dict, is_anomalous: boo
             "category": "CERTIFICATE",
             "session_id": session_id,
             "description": f"The certificate is signed using {cert_sig_algo}, which is cryptographically weak. MD5 and SHA-1 signatures have known collision vulnerabilities.",
-            "evidence": [f"Signature Algorithm: {cert_sig_algo}", "SHA-1 deprecated per CA/Browser Forum Baseline Requirements"],
+            "confidence": "HIGH",
+            "evidence": {
+                "session_id": orig_session.get("id", ""),
+                "pcap": "capture.pcap",
+                "details": f"Signature Algorithm: {cert_sig_algo}, SHA-1 deprecated per CA/Browser Forum Baseline Requirements"
+            },
             "recommendation": "Request a new certificate signed with SHA-256 or SHA-384. Most modern CAs issue SHA-256 by default."
         })
 
@@ -194,12 +239,11 @@ def generate_session_assessment(row: dict, orig_session: dict, is_anomalous: boo
             "category": "ANOMALY",
             "session_id": session_id,
             "description": f"The Isolation Forest model flagged this session as anomalous with a score of {anomaly_score:.2f}/1.0. The session's cryptographic parameters deviate significantly from the baseline distribution of this PCAP capture. This could indicate a misconfigured client, protocol downgrade attempt, or unusual negotiation behavior.",
-            "evidence": [
-                f"Anomaly score: {anomaly_score:.4f} (higher = more anomalous)",
-                f"TLS Version: {tls_version}",
-                f"Cipher: {cipher}",
-                f"Forward Secrecy: {'Yes' if has_fs else 'No'}"
-            ],
+            "evidence": {
+                "session_id": orig_session.get("id", ""),
+                "pcap": "capture.pcap",
+                "details": f"Anomaly score: {anomaly_score:.4f}, TLS Version: {tls_version}, Cipher: {cipher}, Forward Secrecy: {'Yes' if has_fs else 'No'}"
+            },
             "recommendation": "Investigate the session source. Verify the client is using approved email software with up-to-date TLS configuration. Consider network monitoring for repeated anomalous patterns."
         })
     else:

@@ -171,9 +171,11 @@ func (t *TSharkInspector) parseOutput(output []byte) ([]models.TLSInfo, error) {
 		}
 		result.TLSObserved = true
 
+		isServerHello := false
 		for _, ht := range layers.TLSHandshakeType {
 			if ht == "2" {
 				result.ServerHelloSeen = true
+				isServerHello = true
 			} else if ht == "11" {
 				result.CertificateSeen = true
 			} else if ht == "20" {
@@ -200,8 +202,8 @@ func (t *TSharkInspector) parseOutput(output []byte) ([]models.TLSInfo, error) {
 			result.TLSVersion = normalizeTLSVersion(layers.TLSRecordVersion[0])
 		}
 
-		// Cipher suite
-		if len(layers.TLSCipherSuite) > 0 && result.Cipher == "" {
+		// Cipher suite MUST ONLY be extracted from ServerHello
+		if isServerHello && len(layers.TLSCipherSuite) > 0 && result.Cipher == "" {
 			result.Cipher = formatCipherSuite(layers.TLSCipherSuite[0])
 		}
 
