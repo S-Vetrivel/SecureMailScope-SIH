@@ -303,6 +303,8 @@ export default function AnalysisDetailPage() {
               <div className="card-value" style={{ color: data.status !== "COMPLETED" && data.status !== "FAILED" ? "#475569" : "#10b981" }}>
                 {data.status !== "COMPLETED" && data.status !== "FAILED" ? (
                   <div className="loading-shimmer" style={{ width: 60, height: 32, borderRadius: 4 }} />
+                ) : data.forward_secrecy_pct === 100 ? (
+                  sessions.some(s => s.tls && !s.tls.handshake_completed) ? "CONFIRMED*" : "CONFIRMED"
                 ) : (
                   `${(data.forward_secrecy_pct || 0).toFixed(0)}%`
                 )}
@@ -310,6 +312,8 @@ export default function AnalysisDetailPage() {
               <div className="card-subtitle">
                 {data.status !== "COMPLETED" && data.status !== "FAILED" ? (
                   <div className="loading-shimmer" style={{ width: 140, height: 14, borderRadius: 4, marginTop: 6 }} />
+                ) : data.forward_secrecy_pct === 100 ? (
+                  sessions.some(s => s.tls && !s.tls.handshake_completed) ? "*Evidence observed, partial handshake" : "Fully established in all sessions"
                 ) : (
                   "of sessions use ECDHE/DHE"
                 )}
@@ -557,20 +561,29 @@ export default function AnalysisDetailPage() {
                           </div>
                           <div>
                             <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Public Key</div>
-                            <div className="mono" style={{ fontSize: 13, color: "#e2e8f0" }}>{s.certificate?.public_key_algorithm ? `${s.certificate.public_key_algorithm} ${s.certificate.key_length}-bit` : "Unknown"}</div>
+                            <div className="mono" style={{ fontSize: 13, color: s.tls?.certificate_seen === false ? "var(--text-muted)" : "#e2e8f0" }}>
+                              {s.tls?.certificate_seen === false ? "Not observed in capture" : s.certificate?.public_key_algorithm ? `${s.certificate.public_key_algorithm} ${s.certificate.key_length}-bit` : "Unknown"}
+                            </div>
                           </div>
                           <div>
                             <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Signature</div>
-                            <div className="mono" style={{ fontSize: 13, color: "#e2e8f0" }}>{s.certificate?.signature_algorithm || "Unknown"}</div>
+                            <div className="mono" style={{ fontSize: 13, color: s.tls?.certificate_seen === false ? "var(--text-muted)" : "#e2e8f0" }}>
+                              {s.tls?.certificate_seen === false ? "Not observed in capture" : s.certificate?.signature_algorithm || "Unknown"}
+                            </div>
                           </div>
                           <div>
                             <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Forward Secrecy</div>
-                            <div className="mono" style={{ fontSize: 13, color: s.has_forward_secrecy ? "#34d399" : "#f87171" }}>{s.has_forward_secrecy ? "Yes" : "No"}</div>
+                            <div className="mono" style={{ fontSize: 13, color: s.has_forward_secrecy ? "#34d399" : "#f87171" }}>
+                              {s.has_forward_secrecy ? "CONFIRMED" : "No"}
+                              {s.has_forward_secrecy && !s.tls?.handshake_completed && (
+                                <span style={{fontSize: 10, opacity: 0.8, display: 'block', marginTop: 2}}>Evidence: {s.tls?.version} + {s.tls?.key_exchange}</span>
+                              )}
+                            </div>
                           </div>
                           <div>
                             <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>Handshake</div>
-                            <div className="mono" style={{ fontSize: 13, color: s.tls?.handshake_completed ? "#34d399" : s.tls?.handshake_failed ? "#f87171" : "Unknown" }}>
-                              {s.tls?.handshake_completed ? "Completed" : s.tls?.handshake_failed ? "Failed" : "Unknown"}
+                            <div className="mono" style={{ fontSize: 13, color: s.tls?.handshake_completed ? "#34d399" : s.tls?.handshake_failed ? "#f87171" : "#f59e0b" }}>
+                              {s.tls?.handshake_completed ? "Completed" : s.tls?.handshake_failed ? "Failed" : "PARTIAL"}
                             </div>
                           </div>
                           <div>

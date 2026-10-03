@@ -102,6 +102,8 @@ Analyze the security posture of this session based strictly on the provided evid
 - Never invent certificates.
 - Never invent vulnerabilities.
 - Never claim an attack occurred unless evidence explicitly supports it.
+- Never claim a high risk score if the numerical score is 0.
+- Do not describe symmetric encryption of messages unless application data is actually observed. Focus only on the cryptographic negotiation (e.g., TLS version, selected cipher, key exchange) based on the observed handshakes.
 - Distinguish observed facts from interpretation.
 - If evidence is missing, say "Not observed" or "Insufficient evidence".
 - Do not replace deterministic findings.
@@ -173,6 +175,9 @@ Here are the individual sessions analyzed:
 Provide a comprehensive, executive-level summary of the overall security posture, key risks, and strategic recommendations.
 - Be objective and factual.
 - If there are critical vulnerabilities, highlight them.
+- If the risk score is 0, explicitly state that no vulnerabilities or anomalies were found, and DO NOT claim there is high risk.
+- Do not make unsupported claims about the server being secure or compromised; restrict your claims to the evidence provided.
+- Do not describe symmetric encryption of messages unless application data is actually observed. Focus only on the cryptographic negotiation.
 - Format the response as a single, well-structured text summary (Markdown is acceptable).
 - Do not output JSON.`, marshalEvidence(analysis), marshalEvidence(sessions))
 

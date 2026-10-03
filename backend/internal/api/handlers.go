@@ -292,13 +292,17 @@ func (s *Server) ViewPackets(c *gin.Context) {
 	}
 
 	lines := strings.Split(string(out), "\n")
-	var packets []map[string]interface{}
+	var packets = []map[string]interface{}{}
 	for _, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
 		parts := strings.SplitN(line, "|", 7)
 		if len(parts) >= 6 {
+			summary := ""
+			if len(parts) >= 7 {
+				summary = parts[6]
+			}
 			packets = append(packets, map[string]interface{}{
 				"packet_number": parts[0],
 				"timestamp":     parts[1],
@@ -306,7 +310,7 @@ func (s *Server) ViewPackets(c *gin.Context) {
 				"destination":   parts[3],
 				"protocol":      parts[4],
 				"length":        parts[5],
-				"summary":       parts[6],
+				"summary":       summary,
 			})
 		}
 	}

@@ -154,27 +154,12 @@ func (t *TSharkInspector) parseOutput(output []byte) ([]models.TLSInfo, error) {
 			streamMap[streamID] = result
 		}
 
-		if len(layers.IPSrc) > 0 {
-			result.SrcIP = layers.IPSrc[0]
-		} else if len(layers.IPv6Src) > 0 {
-			result.SrcIP = layers.IPv6Src[0]
-		}
-		if len(layers.IPDst) > 0 {
-			result.DstIP = layers.IPDst[0]
-		} else if len(layers.IPv6Dst) > 0 {
-			result.DstIP = layers.IPv6Dst[0]
-		}
-		if len(layers.TCPSrcPort) > 0 {
-			result.SrcPort = layers.TCPSrcPort[0]
-		}
-		if len(layers.TCPDstPort) > 0 {
-			result.DstPort = layers.TCPDstPort[0]
-		}
-		result.TLSObserved = true
-
 		isServerHello := false
+		isClientHello := false
 		for _, ht := range layers.TLSHandshakeType {
-			if ht == "2" {
+			if ht == "1" {
+				isClientHello = true
+			} else if ht == "2" {
 				result.ServerHelloSeen = true
 				isServerHello = true
 			} else if ht == "11" {
@@ -183,6 +168,26 @@ func (t *TSharkInspector) parseOutput(output []byte) ([]models.TLSInfo, error) {
 				result.HandshakeCompleted = true
 			}
 		}
+
+		if !exists || isClientHello {
+			if len(layers.IPSrc) > 0 {
+				result.SrcIP = layers.IPSrc[0]
+			} else if len(layers.IPv6Src) > 0 {
+				result.SrcIP = layers.IPv6Src[0]
+			}
+			if len(layers.IPDst) > 0 {
+				result.DstIP = layers.IPDst[0]
+			} else if len(layers.IPv6Dst) > 0 {
+				result.DstIP = layers.IPv6Dst[0]
+			}
+			if len(layers.TCPSrcPort) > 0 {
+				result.SrcPort = layers.TCPSrcPort[0]
+			}
+			if len(layers.TCPDstPort) > 0 {
+				result.DstPort = layers.TCPDstPort[0]
+			}
+		}
+		result.TLSObserved = true
 
 		for _, ct := range layers.TLSRecordContentType {
 			if ct == "23" {
